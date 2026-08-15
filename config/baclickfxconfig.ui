@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  BA Click FX 配置界面。
+
+  QSlider 仅支持整数，因此带小数的倍率统一放大 100 倍存放，并由
+  baclickfxconfig.cpp 在读写界面时换算。界面只提供平台偏好和功能开关；
+  Unity 数据确定的视觉参数不作为用户配置项。
+-->
+<ui version="4.0">
+ <class>BaClickFxEffectConfigForm</class>
+ <widget class="QWidget" name="BaClickFxEffectConfigForm">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>520</width>
+    <height>300</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+
+   <!-- 全局设置 -->
+   <item>
+    <widget class="QGroupBox" name="globalGroupBox">
+     <property name="title">
+      <string>全局</string>
+     </property>
+     <layout class="QFormLayout" name="globalFormLayout">
+
+      <item row="0" column="0">
+       <widget class="QLabel" name="timeScaleLabel">
+        <property name="text">
+         <string>时间缩放：</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <layout class="QHBoxLayout" name="timeScaleLayout">
+        <item>
+         <widget class="QSlider" name="timeScaleSlider">
+          <property name="minimum">
+           <number>20</number>
+          </property>
+          <property name="maximum">
+           <number>500</number>
+          </property>
+          <property name="value">
+           <number>100</number>
+          </property>
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="toolTip">
+           <string>小于 1 放慢、大于 1 加快整套特效</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="timeScaleValueLabel">
+          <property name="text">
+           <string>1.00</string>
+          </property>
+          <property name="minimumWidth">
+           <number>40</number>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+
+      <item row="1" column="0">
+       <widget class="QLabel" name="globalScaleLabel">
+        <property name="text">
+         <string>整体尺寸：</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <layout class="QHBoxLayout" name="globalScaleLayout">
+        <item>
+         <widget class="QSlider" name="globalScaleSlider">
+          <property name="minimum">
+           <number>50</number>
+          </property>
+          <property name="maximum">
+           <number>500</number>
+          </property>
+          <property name="value">
+           <number>100</number>
+          </property>
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="toolTip">
+           <string>放大或缩小全部图元</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="globalScaleValueLabel">
+          <property name="text">
+           <string>1.00</string>
+          </property>
+          <property name="minimumWidth">
+           <number>40</number>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+
+     </layout>
+    </widget>
+   </item>
+
+   <!-- 拖尾设置 -->
+   <item>
+    <widget class="QGroupBox" name="trailGroupBox">
+     <property name="title">
+      <string>拖尾</string>
+     </property>
+     <layout class="QFormLayout" name="trailFormLayout">
+
+      <item row="0" column="0" colspan="2">
+       <widget class="QCheckBox" name="enableTrailCheckBox">
+        <property name="text">
+         <string>启用拖尾</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>按住左键拖动时产生 ribbon 光带</string>
+        </property>
+       </widget>
+      </item>
+
+     </layout>
+    </widget>
+   </item>
+
+   <!-- 距离发射设置（Ring4） -->
+   <item>
+    <widget class="QGroupBox" name="emitterGroupBox">
+     <property name="title">
+      <string>沿途小三角</string>
+     </property>
+     <layout class="QFormLayout" name="emitterFormLayout">
+
+      <item row="0" column="0" colspan="2">
+       <widget class="QCheckBox" name="enableDistanceEmitterCheckBox">
+        <property name="text">
+         <string>启用沿途小三角</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>拖动时按累计路程连发小三角，对应 Unity 的 rateOverDistance（每 36 逻辑像素一个）</string>
+        </property>
+       </widget>
+      </item>
+
+     </layout>
+    </widget>
+   </item>
+
+   <!-- 调试选项 -->
+   <item>
+    <widget class="QCheckBox" name="debugLogCheckBox">
+     <property name="text">
+      <string>输出调试日志</string>
+     </property>
+     <property name="toolTip">
+      <string>用 journalctl --user -f -n 0 -o cat QT_CATEGORY=kwin_effect_ba_click_fx 查看</string>
+     </property>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QCheckBox" name="debugDamageCheckBox">
+     <property name="text">
+      <string>显示重绘区域边框</string>
+     </property>
+     <property name="toolTip">
+      <string>青色为特效申请区域，洋红色为 KWin 本次输出渲染区域；性能测试时建议关闭</string>
+     </property>
+    </widget>
+   </item>
+
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>20</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
