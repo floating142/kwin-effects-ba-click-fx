@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "baclickfxdefaults.h"
 #include "clickinstance.h"
 #include "curveutils.h"
 #include "gpurenderer.h"
@@ -120,7 +121,7 @@ private:
     /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
     int liveDistanceParticles(std::uint64_t dragSerial) const;
 
-    bool m_debugLog = false;
+    baclickfx::defaults::LogLevel m_logLevel = baclickfx::defaults::kLogLevelDefault;
     bool m_debugDamage = false;
     bool m_dragging = false;
     double m_timeScale = 1.0;
@@ -185,7 +186,11 @@ private:
     // 旧粒子。最终 composite 仍只使用当前 dirty 区域。
     Region m_lastClearArea;
 
-    // 性能统计状态，仅在 DebugLog 开启时更新。记录 CPU 分段、异步 GPU 计时、呈现
+    bool logsInstances() const;
+    bool logsFrames() const;
+    bool logsVerbose() const;
+
+    // 性能统计状态，仅在帧统计级别及以上更新。记录 CPU 分段、异步 GPU 计时、呈现
     // 间隔，以及插件申请区域与 KWin 实际重绘区域的差异。
     void logFrameStats(const Region &deviceRegion, double cpuMs);
 
@@ -199,6 +204,16 @@ private:
     double m_lastParticleCpuMs = 0.0;
     double m_lastFinishCpuMs = 0.0;
     double m_inputCpuMsSinceLog = 0.0;
+    std::uint64_t m_inputEvents = 0;
+    std::uint64_t m_inputAccepted = 0;
+    std::uint64_t m_inputMerged = 0;
+    std::uint64_t m_inputDiscarded = 0;
+    std::uint64_t m_inputCrossScreen = 0;
+    std::uint64_t m_skipNoActivity = 0;
+    std::uint64_t m_skipNoDamage = 0;
+    std::uint64_t m_skipGpu = 0;
+    std::uint64_t m_skipTarget = 0;
+    std::uint64_t m_skipImport = 0;
 
     int m_statFrames = 0;
     double m_statCpuMsSum = 0.0;

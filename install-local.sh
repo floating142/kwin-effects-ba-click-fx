@@ -21,8 +21,6 @@ fi
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Effect id 由插件文件名派生，同时用于配置键和 D-Bus 调用。
 EFFECT_ID="kwin4_effect_ba_click_fx"
-CONFIG_GROUP="Effect-ba-click-fx"
-LOG_CATEGORY="kwin_effect_ba_click_fx"
 
 MODE="system"
 RELOAD=1
@@ -134,9 +132,5 @@ if [[ "${MODE}" == "system" && "${was_loaded}" == "true" ]]; then
 fi
 
 echo
-echo "查看已有日志： journalctl --user --since=-2min -o cat QT_CATEGORY=${LOG_CATEGORY}"
-echo "持续查看日志： journalctl --user -f -n 0 -o cat QT_CATEGORY=${LOG_CATEGORY}"
-echo "开启调试： kwriteconfig6 --file kwinrc --group ${CONFIG_GROUP} --key DebugLog true"
-echo "          ${QDBUS} org.kde.KWin /Effects reconfigureEffect ${EFFECT_ID}"
-echo "核对运行状态： ${QDBUS} org.kde.KWin /Effects debug ${EFFECT_ID} status"
-echo "主动测试日志： ${QDBUS} org.kde.KWin /Effects debug ${EFFECT_ID} log"
+echo "日志与诊断请在特效设置页操作。命令行故障排查见 README.md 和 TESTING.md。"
+echo "运行状态： ${QDBUS} org.kde.KWin /Effects debug ${EFFECT_ID} status"

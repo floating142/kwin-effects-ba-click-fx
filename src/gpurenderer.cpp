@@ -14,6 +14,7 @@
 #include <opengl/glshadermanager.h>
 
 #include <QFile>
+#include <QLoggingCategory>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -23,8 +24,13 @@
 namespace KWin
 {
 
+Q_LOGGING_CATEGORY(KWIN_BA_CLICK_FX_RENDERER, "kwin_effect_ba_click_fx")
+
 namespace
 {
+
+#define GPU_ERROR() qCWarning(KWIN_BA_CLICK_FX_RENDERER) \
+    << "event=error component=gpu_renderer"
 
 // 着色器源码安装在 shader/ 目录，并在初始化阶段读取和编译。
 
@@ -210,13 +216,13 @@ QByteArray readShaderSource(const char *name)
 {
     const QString path = locateShader(name);
     if (path.isEmpty()) {
-        qWarning() << "GPURenderer: 找不到着色器" << name;
+        GPU_ERROR() << "code=shader_missing" << "name=" << name;
         return {};
     }
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "GPURenderer: 无法读取着色器" << path << file.errorString();
+        GPU_ERROR() << "code=shader_read_failed" << "path=" << path << file.errorString();
         return {};
     }
     return file.readAll();
@@ -255,6 +261,15 @@ GPURenderer::~GPURenderer()
 
 bool GPURenderer::initialize()
 {
+    const auto glString = [](GLenum name) {
+        const GLubyte *value = glGetString(name);
+        return value ? QString::fromLatin1(reinterpret_cast<const char *>(value))
+                     : QStringLiteral("unknown");
+    };
+    m_gpuVendor = glString(GL_VENDOR);
+    m_gpuRenderer = glString(GL_RENDERER);
+    m_gpuVersion = glString(GL_VERSION);
+
     // 由着色器编译结果判断当前 OpenGL 上下文是否满足要求，避免重复维护版本判据。
 
     // 按 Unity .meta 中的 wrapU/wrapV 设置各纹理的环绕模式
@@ -269,7 +284,7 @@ bool GPURenderer::initialize()
     m_texTrail = loadTexture("FX_TEX_Trail_03.png", GL_REPEAT);
 
     if (!m_texCircle || !m_texGradRing3 || !m_texTriangle || !m_texTrail) {
-        qWarning() << "GPURenderer: 纹理加载失败，无法初始化";
+        GPU_ERROR() << "code=texture_init_failed";
         return false;
     }
 
@@ -282,7 +297,7 @@ bool GPURenderer::initialize()
 
     if (!m_shaderBackground || !m_shaderAlphablendAdd || !m_shaderDissolve || !m_shaderAdditive
         || !m_shaderComposite) {
-        qWarning() << "GPURenderer: Shader 编译失败，无法初始化";
+        GPU_ERROR() << "code=shader_init_failed";
         return false;
     }
 
@@ -291,19 +306,54 @@ bool GPURenderer::initialize()
     m_shaderBloomDownsample = loadShader("particle.vert", "bloom_downsample.frag");
     m_shaderBloomUpsample = loadShader("particle.vert", "bloom_upsample.frag");
     if (!m_shaderBloomPrefilter || !m_shaderBloomDownsample || !m_shaderBloomUpsample) {
-        qWarning() << "GPURenderer: Bloom shader 编译失败，辉光将关闭";
+        GPU_ERROR() << "code=bloom_shader_failed" << "action=bloom_disabled";
     }
 
     // 使用私有 VAO/VBO；顶点属性位置随着色器变化，在每次绘制前重新配置。
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);
     if (m_vao == 0 || m_vbo == 0) {
-        qWarning() << "GPURenderer: VAO/VBO 创建失败";
+        GPU_ERROR() << "code=buffer_init_failed";
         return false;
     }
 
-    qInfo() << "GPURenderer 初始化成功";
+    qCInfo(KWIN_BA_CLICK_FX_RENDERER) << "event=initialized component=gpu_renderer";
     return true;
+}
+
+QString GPURenderer::diagnosticStatus() const
+{
+    QStringList outputs;
+    outputs.reserve(qsizetype(m_outputs.size()));
+    for (const auto &target : m_outputs) {
+        QStringList bloomSizes;
+        for (const BloomLevel &level : target->bloomLevels) {
+            bloomSizes.append(QStringLiteral("%1x%2")
+                                  .arg(level.size.width())
+                                  .arg(level.size.height()));
+        }
+        outputs.append(QStringLiteral("%1x%2@%3:bloom=%4")
+                           .arg(target->devicePx.width())
+                           .arg(target->devicePx.height())
+                           .arg(target->scale, 0, 'f', 2)
+                           .arg(target->bloomLevels.size())
+                       + QStringLiteral(":hdr=%1x%2:bg=%3x%4:bloom_sizes=%5")
+                             .arg(target->hdrTexture ? target->devicePx.width() : 0)
+                             .arg(target->hdrTexture ? target->devicePx.height() : 0)
+                             .arg(target->bgTexture ? target->devicePx.width() : 0)
+                             .arg(target->bgTexture ? target->devicePx.height() : 0)
+                             .arg(bloomSizes.join(QLatin1Char('|'))));
+    }
+    return QStringLiteral("gpu_vendor=\"%1\" gpu_renderer=\"%2\" gpu_version=\"%3\" "
+                          "textures_ready=%4 shaders_ready=%5 targets=\"%6\"")
+        .arg(m_gpuVendor.isEmpty() ? QStringLiteral("uninitialized") : m_gpuVendor)
+        .arg(m_gpuRenderer.isEmpty() ? QStringLiteral("uninitialized") : m_gpuRenderer)
+        .arg(m_gpuVersion.isEmpty() ? QStringLiteral("uninitialized") : m_gpuVersion)
+        .arg(bool(m_texCircle && m_texGradRing3 && m_texTriangle && m_texTrail))
+        .arg(bool(m_shaderBackground && m_shaderAlphablendAdd && m_shaderDissolve
+                  && m_shaderAdditive && m_shaderComposite && m_shaderBloomPrefilter
+                  && m_shaderBloomDownsample && m_shaderBloomUpsample))
+        .arg(outputs.join(QLatin1Char(',')));
 }
 
 GPURenderer::ShaderSet GPURenderer::loadShader(const char *vertexFile, const char *fragmentFile)
@@ -328,7 +378,8 @@ GPURenderer::ShaderSet GPURenderer::loadShader(const char *vertexFile, const cha
 
     // 附加逻辑名称便于区分失败阶段；详细 GLSL 日志由 KWin 的 kwin_opengl 分类输出。
     if (!set.shader) {
-        qWarning() << "GPURenderer: 着色器编译失败" << vertexFile << fragmentFile;
+        GPU_ERROR() << "code=shader_compile_failed" << "vertex=" << vertexFile
+                    << "fragment=" << fragmentFile;
         return {};
     }
 
@@ -345,13 +396,13 @@ std::unique_ptr<GLTexture> GPURenderer::loadTexture(const char *assetName, GLenu
 {
     const QString path = locateAsset(assetName);
     if (path.isEmpty()) {
-        qWarning() << "GPURenderer: 找不到资源" << assetName;
+        GPU_ERROR() << "code=asset_missing" << "name=" << assetName;
         return nullptr;
     }
 
     QImage img(path);
     if (img.isNull()) {
-        qWarning() << "GPURenderer: 图片加载失败" << path;
+        GPU_ERROR() << "code=image_load_failed" << "path=" << path;
         return nullptr;
     }
 
@@ -360,7 +411,7 @@ std::unique_ptr<GLTexture> GPURenderer::loadTexture(const char *assetName, GLenu
     const QImage rgba = img.convertToFormat(QImage::Format_RGBA8888);
     auto tex = GLTexture::allocate(GL_SRGB8_ALPHA8, rgba.size(), 1);
     if (!tex || tex->isNull()) {
-        qWarning() << "GPURenderer: 纹理分配失败" << path;
+        GPU_ERROR() << "code=texture_alloc_failed" << "path=" << path;
         return nullptr;
     }
     tex->update(rgba, Region(0, 0, rgba.width(), rgba.height()));
@@ -408,7 +459,7 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
     // 创建线性 RGBA16F 场景纹理及其帧缓冲。
     targets->hdrTexture = GLTexture::allocate(GL_RGBA16F, devicePx, 1);
     if (!targets->hdrTexture || targets->hdrTexture->isNull()) {
-        qWarning() << "GPURenderer: 无法分配 HDR 纹理" << devicePx;
+        GPU_ERROR() << "code=hdr_texture_alloc_failed" << devicePx;
         return false;
     }
     targets->hdrTexture->setFilter(GL_LINEAR);
@@ -416,14 +467,14 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
 
     targets->hdrFbo = std::make_unique<GLFramebuffer>(targets->hdrTexture.get());
     if (!targets->hdrFbo->valid()) {
-        qWarning() << "GPURenderer: FBO 创建失败";
+        GPU_ERROR() << "code=hdr_fbo_failed";
         return false;
     }
 
     // 屏幕缓冲先复制到同尺寸背景纹理，再由背景着色器解码到 hdrFbo。
     targets->bgTexture = GLTexture::allocate(GL_RGBA16F, devicePx, 1);
     if (!targets->bgTexture || targets->bgTexture->isNull()) {
-        qWarning() << "GPURenderer: 无法分配背景暂存纹理" << devicePx;
+        GPU_ERROR() << "code=background_texture_alloc_failed" << devicePx;
         return false;
     }
     // 线性过滤可平滑分数缩放下区域边缘的半像素取整误差。
@@ -432,7 +483,7 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
 
     targets->bgFbo = std::make_unique<GLFramebuffer>(targets->bgTexture.get());
     if (!targets->bgFbo->valid()) {
-        qWarning() << "GPURenderer: 背景暂存 FBO 创建失败";
+        GPU_ERROR() << "code=background_fbo_failed";
         return false;
     }
 
@@ -504,7 +555,7 @@ bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devic
                                     std::unique_ptr<GLFramebuffer> &fbo) {
             tex = GLTexture::allocate(GL_RGBA16F, s, 1);
             if (!tex || tex->isNull()) {
-                qWarning() << "GPURenderer: bloom 纹理分配失败" << s;
+                GPU_ERROR() << "code=bloom_texture_alloc_failed" << s;
                 return false;
             }
             // 降采样和盒式上采样依赖硬件双线性过滤减少采样次数。
@@ -514,7 +565,7 @@ bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devic
 
             fbo = std::make_unique<GLFramebuffer>(tex.get());
             if (!fbo->valid()) {
-                qWarning() << "GPURenderer: bloom FBO 创建失败" << s;
+                GPU_ERROR() << "code=bloom_fbo_failed" << s;
                 return false;
             }
             return true;
@@ -781,7 +832,8 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
             static bool warned = false;
             if (!warned) {
                 warned = true;
-                qWarning() << "GPURenderer: 无法取得桌面像素（渲染目标既不能 blit "
+                GPU_ERROR() << "code=desktop_import_failed"
+                            << "无法取得桌面像素（渲染目标既不能 blit "
                               "也没有可采样纹理），插件不会绘制";
             }
             // 返回前闭合已开始的查询，保证下一帧可以重新提交计时。

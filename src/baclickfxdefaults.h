@@ -19,8 +19,8 @@ namespace baclickfx::defaults
 /// KWin 配置文件中的特效配置组。
 inline constexpr const char *kGroup = "Effect-ba-click-fx";
 
-/// 运行时调试日志开关的配置键。
-inline constexpr const char *kDebugLog = "DebugLog";
+/// 运行时日志级别的配置键。
+inline constexpr const char *kLogLevel = "LogLevel";
 
 /// 重绘区域可视化开关的配置键。
 inline constexpr const char *kDebugDamage = "DebugDamage";
@@ -46,8 +46,15 @@ inline constexpr const char *kEnableDistanceEmitter = "EnableDistanceEmitter";
  * @{
  */
 
-/// 默认关闭运行时调试日志。
-inline constexpr bool kDebugLogDefault = false;
+enum class LogLevel : int {
+    Off = 0,
+    Error,
+    Instance,
+    Frame,
+    Verbose,
+};
+
+inline constexpr LogLevel kLogLevelDefault = LogLevel::Off;
 
 /// 默认关闭重绘区域可视化。
 inline constexpr bool kDebugDamageDefault = false;

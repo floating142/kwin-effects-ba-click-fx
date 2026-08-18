@@ -24,11 +24,13 @@ SIZE="1600x900"
 # scale=1 的屏上一切正常，scale=2 才看得出朝左上偏 + 尺寸减半 + 右下被裁）。
 # 有了这个开关就不必把嵌套窗口拖到另一块物理屏上去复现，任何屏都能测。
 SCALE="1"
+NO_PLASMA=0
 for arg in "$@"; do
   case "${arg}" in
     --no-build) BUILD=0 ;;
     --debug) DEBUG=1 ;;
     --profile) PROFILE=1 ;;
+    --no-plasma) NO_PLASMA=1 ;;
     --size=*) SIZE="${arg#*=}" ;;
     --scale=*) SCALE="${arg#*=}" ;;
     *) echo "未知参数: ${arg}" >&2
@@ -83,12 +85,12 @@ if [[ -z "${QDBUS}" ]]; then
 fi
 
 if [[ "${DEBUG}" -eq 1 ]]; then
-  echo "==> 打开 DebugLog 与重绘区域边框"
-  kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key DebugLog true
+  echo "==> 打开详细调试日志与重绘区域边框"
+  kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key LogLevel 4
   kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key DebugDamage true
 elif [[ "${PROFILE}" -eq 1 ]]; then
   echo "==> 打开性能日志，关闭重绘区域边框"
-  kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key DebugLog true
+  kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key LogLevel 3
   kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key DebugDamage false
 fi
 
@@ -164,9 +166,12 @@ dbus-run-session -- bash -c '
   #
   # QT_QPA_PLATFORM 必须显式指定：这个 shell 里还继承着宿主的 DISPLAY=:0，
   # 不指定的话 Qt 可能挑 xcb 后端连回宿主的 X，窗口就开到嵌套会话外面去了。
-  export WAYLAND_DISPLAY="${KWIN_SOCKET}"
-  export QT_QPA_PLATFORM=wayland
-  plasmashell >/dev/null 2>&1 &
+  # 如果开启了 --no-plasma，就不启动壁纸和面板，背景保持纯黑
+  if [[ "${NO_PLASMA}" -eq 0 ]]; then
+    export WAYLAND_DISPLAY="${KWIN_SOCKET}"
+    export QT_QPA_PLATFORM=wayland
+    plasmashell >/dev/null 2>&1 &
+  fi
 
   # 再给一个可点的窗口，方便测「特效画在窗口之上」。--separate 强制新实例，
   # 否则 konsole 的 D-Bus 单实例机制会把请求转回主会话，标签页开到外面去。

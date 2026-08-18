@@ -4,6 +4,7 @@ add_library(kwin4_effect_ba_click_fx MODULE)
 
 target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE
     BA_CLICK_FX_BUILD_ID="${BA_CLICK_FX_BUILD_ID}"
+    BA_CLICK_FX_KWIN_VERSION="${KWin_VERSION}"
 )
 
 # KWIN_EFFECT_FACTORY_* 宏展开后才包含 Q_OBJECT。将这些宏注册给 AutoMoc，确保
@@ -22,6 +23,8 @@ target_sources(kwin4_effect_ba_click_fx PRIVATE
     clickinstance.cpp
     trailstream.cpp
     curveutils.cpp
+    diagnostics.cpp
+    damageutils.cpp
     subsystems.cpp
     meshprofiles.cpp
     main.cpp

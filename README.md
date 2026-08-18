@@ -6,6 +6,8 @@
 
 `kwin-effects-ba-click-fx` 将 `FX_Touch` 中 ParticleSystem、TrailRenderer 与后处理参数逐项还原到 KWin：点击时播放中心圆盘、溶解圆环和 Ring3 粒子，按住左键拖动时生成 Ribbon 拖尾与 Ring4 距离发射粒子。渲染由原生 C++ / OpenGL 完成，使用线性 RGBA16F Scene 和 Unity PPv2 MXFinalBloom，不依赖脚本运行时。
 
+![BA Click FX 预览](preview/logo.gif)
+
 ## 特性
 
 - 从 Unity 参数逐项移植，不是相似风格的重新设计
@@ -60,58 +62,36 @@ KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。升级 KWin 后必
 
 卸载用户级安装时使用 `--user`。默认保留效果配置；如需同时删除配置和启用状态，追加 `--purge-config`。
 
-## 嵌套测试
+## 测试与兼容性
 
-开发时建议使用独立的嵌套 KWin 会话：
-
-```bash
-./test-nested.sh
-```
-
-性能日志模式：
-
-```bash
-./test-nested.sh --profile
-```
-
-重绘区域可视化模式：
-
-```bash
-./test-nested.sh --debug
-```
-
-可额外指定逻辑尺寸与输出缩放：
-
-```bash
-./test-nested.sh --size=1600x900 --scale=2
-```
-
-嵌套会话使用独立 Wayland socket 和 D-Bus，会话关闭后进程与插件二进制都会重新加载，适合验证 C++ 修改。
+自动测试、嵌套 KWin 会话、双屏/HiDPI/HDR 验证和回滚说明见
+[TESTING.md](TESTING.md)。
 
 ## 日志与诊断
 
-开启运行时日志：
+日常使用优先通过设置页的“日志级别”“复制诊断信息”“生成诊断报告”和“打开诊断目录”操作。
+设置页不可用时，可使用命令行备用入口：
 
 ```bash
-kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key DebugLog true
+kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key LogLevel 3
 qdbus-qt6 org.kde.KWin /Effects reconfigureEffect kwin4_effect_ba_click_fx
 ```
 
-查看已有日志或持续跟踪：
+日志级别为 `0=关闭`、`1=错误`、`2=实例`、`3=帧统计`、`4=详细调试`。查看日志：
 
 ```bash
 journalctl --user --since=-2min -o cat QT_CATEGORY=kwin_effect_ba_click_fx
 journalctl --user -f -n 0 -o cat QT_CATEGORY=kwin_effect_ba_click_fx
 ```
 
-Qt 日志分类保存在 journal 的 `QT_CATEGORY` 字段中，消息正文通常只有“起实例”“帧统计”等内容。使用上面的字段匹配比在 `-o cat` 输出后追加文本过滤更可靠。
-
-查询运行实例或主动生成测试日志：
+查询运行状态或生成结构化诊断：
 
 ```bash
 qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx status
-qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx log
+qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx diagnostics
 ```
+
+报告保存在 `~/.cache/ba-click-fx/diagnostics/`。详细字段说明见 [TESTING.md](TESTING.md)。
 
 显示重绘区域：
 

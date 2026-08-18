@@ -34,6 +34,7 @@
 
 #include <QRectF>
 #include <QSize>
+#include <QString>
 
 #include <array>
 #include <memory>
@@ -127,6 +128,9 @@ public:
     double lastGpuBloomMs() const { return m_lastGpuBloomMs; }
     double lastGpuCompositeMs() const { return m_lastGpuCompositeMs; }
     std::uint64_t gpuSampleSerial() const { return m_gpuSampleSerial; }
+
+    /// 返回 GPU、已加载资源和逐输出渲染目标的稳定诊断摘要。
+    QString diagnosticStatus() const;
 
     /**
      * 计算辉光在单个输出上的最大逻辑像素传播半径。
@@ -317,6 +321,9 @@ private:
     double m_lastGpuBloomMs = -1.0;
     double m_lastGpuCompositeMs = -1.0;
     std::uint64_t m_gpuSampleSerial = 0;
+    QString m_gpuVendor;
+    QString m_gpuRenderer;
+    QString m_gpuVersion;
 };
 
 } // namespace KWin

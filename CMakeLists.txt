@@ -51,4 +51,10 @@ message(STATUS "BA Click FX build id: ${BA_CLICK_FX_BUILD_ID}")
 add_subdirectory(src)
 add_subdirectory(config)
 
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 6.10 REQUIRED COMPONENTS Test)
+    add_subdirectory(tests)
+endif()
+
 feature_summary(WHAT ALL FATAL_ON_MISSING_REQUIRED_PACKAGES)
