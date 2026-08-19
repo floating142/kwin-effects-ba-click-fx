@@ -56,8 +56,14 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.enableTrailCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.alwaysTrailCheckBox, &QCheckBox::toggled,
+            this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.enableDistanceEmitterCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.enableTrailCheckBox, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_ui.alwaysTrailCheckBox->setEnabled(enabled);
+        m_ui.enableDistanceEmitterCheckBox->setEnabled(enabled);
+    });
     connect(m_ui.logLevelComboBox, &QComboBox::currentIndexChanged,
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.debugDamageCheckBox, &QCheckBox::toggled,
@@ -156,8 +162,12 @@ void BaClickFxEffectConfig::load()
 
     m_ui.enableTrailCheckBox->setChecked(
         conf.readEntry(def::kEnableTrail, def::kEnableTrailDefault));
+    m_ui.alwaysTrailCheckBox->setChecked(
+        conf.readEntry(def::kAlwaysTrail, def::kAlwaysTrailDefault));
     m_ui.enableDistanceEmitterCheckBox->setChecked(
         conf.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault));
+    m_ui.alwaysTrailCheckBox->setEnabled(m_ui.enableTrailCheckBox->isChecked());
+    m_ui.enableDistanceEmitterCheckBox->setEnabled(m_ui.enableTrailCheckBox->isChecked());
     m_ui.logLevelComboBox->setCurrentIndex(std::clamp(
         conf.readEntry(def::kLogLevel, int(def::kLogLevelDefault)),
         int(def::LogLevel::Off), int(def::LogLevel::Verbose)));
@@ -177,6 +187,7 @@ void BaClickFxEffectConfig::save()
     conf.writeEntry(def::kGlobalScale, m_ui.globalScaleSlider->value() / double(kSliderScale));
 
     conf.writeEntry(def::kEnableTrail, m_ui.enableTrailCheckBox->isChecked());
+    conf.writeEntry(def::kAlwaysTrail, m_ui.alwaysTrailCheckBox->isChecked());
     conf.writeEntry(def::kEnableDistanceEmitter,
                     m_ui.enableDistanceEmitterCheckBox->isChecked());
     conf.writeEntry(def::kLogLevel, m_ui.logLevelComboBox->currentIndex());
@@ -203,6 +214,7 @@ void BaClickFxEffectConfig::defaults()
     m_ui.globalScaleSlider->setValue(int(def::kGlobalScaleDefault * kSliderScale));
 
     m_ui.enableTrailCheckBox->setChecked(def::kEnableTrailDefault);
+    m_ui.alwaysTrailCheckBox->setChecked(def::kAlwaysTrailDefault);
     m_ui.enableDistanceEmitterCheckBox->setChecked(def::kEnableDistanceEmitterDefault);
     m_ui.logLevelComboBox->setCurrentIndex(int(def::kLogLevelDefault));
     m_ui.debugDamageCheckBox->setChecked(def::kDebugDamageDefault);

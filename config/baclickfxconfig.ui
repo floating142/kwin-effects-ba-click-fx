@@ -136,6 +136,12 @@
        </widget>
       </item>
       <item row="1" column="0" colspan="2">
+       <widget class="QCheckBox" name="alwaysTrailCheckBox">
+        <property name="text"><string>无需按住鼠标</string></property>
+        <property name="toolTip"><string>光标移动时持续显示拖尾，可能增加 GPU 占用</string></property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
        <widget class="QCheckBox" name="enableDistanceEmitterCheckBox">
         <property name="text"><string>启用沿途小三角</string></property>
         <property name="checked"><bool>true</bool></property>
@@ -173,7 +179,7 @@
       <string>显示重绘区域边框</string>
      </property>
      <property name="toolTip">
-      <string>青色为特效申请区域，洋红色为 KWin 本次输出渲染区域；性能测试时建议关闭</string>
+      <string>显示特效申请区域；性能测试时建议关闭</string>
      </property>
     </widget>
    </item>

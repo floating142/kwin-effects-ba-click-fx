@@ -82,6 +82,9 @@ std::vector<StrokeData> buildTrailStrokes(const TrailStream &stream,
                                           const baclickfx::Subsystem &trail,
                                           const QPointF &origin);
 
+void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &trail,
+                       const QPointF &origin, std::vector<StrokeData> &out);
+
 /// 采样 TrailRenderer 渐变颜色，并返回线性 RGB；`tNorm=0` 为头部。
 baclickfx::Rgb evalTrailGradientColor(const baclickfx::Subsystem &trail, double tNorm);
 

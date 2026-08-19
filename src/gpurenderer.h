@@ -127,6 +127,7 @@ public:
     double lastGpuParticleMs() const { return m_lastGpuParticleMs; }
     double lastGpuBloomMs() const { return m_lastGpuBloomMs; }
     double lastGpuCompositeMs() const { return m_lastGpuCompositeMs; }
+    QString lastGpuOutput() const { return m_lastGpuOutput; }
     std::uint64_t gpuSampleSerial() const { return m_gpuSampleSerial; }
 
     /// 返回 GPU、已加载资源和逐输出渲染目标的稳定诊断摘要。
@@ -268,6 +269,10 @@ private:
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
     std::vector<ParticleVertex> m_vertices;
+    std::vector<StrokeData> m_trailStrokes;
+    std::vector<QPointF> m_trailNormals;
+    std::vector<QPointF> m_trailDirs;
+    std::vector<ParticleVertex> m_trailStrip;
 
     // 当前帧从输出局部坐标到标准化设备坐标的投影矩阵。
     QMatrix4x4 m_projection;
@@ -299,6 +304,7 @@ private:
         bool pending = false;
         bool publishable = false;
         int issuedPhases = 0;
+        QString output;
     };
 
     void collectGpuTimings();
@@ -320,6 +326,7 @@ private:
     double m_lastGpuParticleMs = -1.0;
     double m_lastGpuBloomMs = -1.0;
     double m_lastGpuCompositeMs = -1.0;
+    QString m_lastGpuOutput;
     std::uint64_t m_gpuSampleSerial = 0;
     QString m_gpuVendor;
     QString m_gpuRenderer;

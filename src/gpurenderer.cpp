@@ -633,6 +633,7 @@ void GPURenderer::collectGpuTimings()
             m_lastGpuCompositeMs = phaseMs[int(GpuTimerPhase::Composite)];
             m_lastGpuMs = m_lastGpuImportMs + m_lastGpuParticleMs
                 + m_lastGpuBloomMs + m_lastGpuCompositeMs;
+            m_lastGpuOutput = frame.output;
             m_gpuSampleSerial++;
         }
 
@@ -671,6 +672,10 @@ void GPURenderer::beginGpuTimingFrame()
     frame.pending = true;
     frame.publishable = true;
     frame.issuedPhases = 0;
+    frame.output = QStringLiteral("%1x%2@%3")
+        .arg(m_current->devicePx.width())
+        .arg(m_current->devicePx.height())
+        .arg(m_current->scale, 0, 'f', 2);
     m_activeTimerFrame = slot;
     m_activeTimerPhase = -1;
     m_nextTimerFrame = (slot + 1) % kGpuTimerFrameCount;
@@ -1037,15 +1042,17 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
 
     // TrailRenderer.colorGradient 沿轨迹求值：t=0 为笔头，t=1 为笔尾。
 
-    for (const StrokeData &stroke :
-         buildTrailStrokes(trail, params, outputOrigin)) {
+    buildTrailStrokes(trail, params, outputOrigin, m_trailStrokes);
+    for (const StrokeData &stroke : m_trailStrokes) {
         const std::vector<StrokeSample> &s = stroke.samples;
         const std::size_t n = s.size();
 
         // 使用角平分法线构造主带；转角外侧由 numCornerVertices 扇面补齐，且仅与
         // 主带共边，避免加法混合区域重叠。
-        std::vector<QPointF> normals(n);
-        std::vector<QPointF> dirs(n > 1 ? n - 1 : 0);
+        m_trailNormals.resize(n);
+        m_trailDirs.resize(n > 1 ? n - 1 : 0);
+        std::vector<QPointF> &normals = m_trailNormals;
+        std::vector<QPointF> &dirs = m_trailDirs;
         QPointF lastDir(1, 0);
         for (std::size_t i = 0; i + 1 < n; i++) {
             const double dx = s[i + 1].pos.x() - s[i].pos.x();
@@ -1066,7 +1073,8 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
         }
 
         // 每段由两个三角形组成。顶点色沿轨迹渐变，HDR 倍率已预乘到 RGB。
-        std::vector<ParticleVertex> strip;
+        std::vector<ParticleVertex> &strip = m_trailStrip;
+        strip.clear();
         strip.reserve((n - 1) * 6);
 
         const auto vertexAtOffset = [&](std::size_t i, const QPointF &offset,

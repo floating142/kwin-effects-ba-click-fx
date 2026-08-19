@@ -4,6 +4,7 @@
 #include "baclickfxdefaults.h"
 #include "diagnostics.h"
 #include "damageutils.h"
+#include "pathresampler.h"
 
 #include <core/renderviewport.h>
 #include <effect/effecthandler.h>
@@ -246,8 +247,9 @@ void BaClickFxEffect::loadConfig()
 
     // Unity 已定义的视觉参数保持固定；以下配置只控制对应图层是否绘制。
     m_enableTrail = group.readEntry(def::kEnableTrail, def::kEnableTrailDefault);
-    m_enableDistanceEmitter =
-        group.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault);
+    m_alwaysTrail = group.readEntry(def::kAlwaysTrail, def::kAlwaysTrailDefault);
+    m_enableDistanceEmitter = m_enableTrail
+        && group.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault);
 
     // GPU timer 只在帧统计及以上级别启用。
     m_gpu.setProfiling(logsFrames());
@@ -260,6 +262,8 @@ void BaClickFxEffect::loadConfig()
     m_statFinishCpuMsSum = 0.0;
     m_inputCpuMsSinceLog = 0.0;
     m_inputEvents = m_inputAccepted = m_inputMerged = m_inputDiscarded = m_inputCrossScreen = 0;
+    m_mouseChangedEvents = m_mouseChangedMotion = 0;
+    m_pointerMotionEvents = m_fallbackSamples = 0;
     m_skipNoActivity = m_skipNoDamage = m_skipGpu = m_skipTarget = m_skipImport = 0;
     m_statGpuMsSum = m_statGpuMsMax = 0.0;
     m_statGpuImportMsSum = 0.0;
@@ -467,6 +471,8 @@ bool BaClickFxEffect::trailEnabled() const
 void BaClickFxEffect::startDrag(const QPointF &pos)
 {
     m_dragging = true;
+    m_motionEventsWork = false;
+    m_autoTrailSession = false;
     m_lastDrag = pos;
     m_trailEmit = pos;
     m_trailEmitValid = true;
@@ -529,9 +535,6 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
     if (outputAt(m_lastDrag) != outputAt(pos)) {
         ++m_inputCrossScreen;
     }
-    const double dirX = dx / dist;
-    const double dirY = dy / dist;
-
     TrailSession *session = !m_trails.empty() && m_trails.back().active
         ? &m_trails.back()
         : nullptr;
@@ -539,26 +542,17 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
     if (trailEnabled() && session) {
         // 按 TrailRenderer.m_MinVertexDistance 的累计路程离散采样。
         const double minStep = std::max(1e-3, session->trailParams.minVertexDistancePx);
-        double remain = dist;
-        QPointF walk = m_lastDrag;
-
-        bool emittedTrailSample = false;
-        while (m_trailAccum + remain >= minStep) {
-            const double step = minStep - m_trailAccum;
-            const QPointF next(walk.x() + dirX * step, walk.y() + dirY * step);
+        const baclickfx::PathResampleResult samples = baclickfx::resamplePathSegment(
+            m_lastDrag, pos, minStep, m_trailAccum);
+        for (const QPointF &next : samples.points) {
             if (m_trailEmitValid) {
                 session->stream.addSegment(m_trailEmit, next);
             }
             m_trailEmit = next;
             m_trailEmitValid = true;
-            emittedTrailSample = true;
-            walk = next;
-            remain -= step;
-            m_trailAccum = 0;
         }
-
-        m_trailAccum += remain;
-        if (!emittedTrailSample) {
+        m_trailAccum = samples.remainder;
+        if (samples.points.empty()) {
             ++m_inputMerged;
         }
     }
@@ -569,16 +563,9 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
             // rateOverDistance 的每次发射发生在路径跨过阈值的那个位置，不是本次
             // pointer event 的终点。逐个求线段交点，保证低频长事件和高频短事件
             // 得到相同的空间分布。
-            double walked = 0.0;
-            double remaining = dist;
-            while (m_distAccum + remaining >= stepPx) {
-                const double toEmission = stepPx - m_distAccum;
-                walked += toEmission;
-                remaining -= toEmission;
-                m_distAccum = 0.0;
-                const QPointF emissionPos(m_lastDrag.x() + dirX * walked,
-                                          m_lastDrag.y() + dirY * walked);
-
+            const baclickfx::PathResampleResult emissions = baclickfx::resamplePathSegment(
+                m_lastDrag, pos, stepPx, m_distAccum);
+            for (const QPointF &emissionPos : emissions.points) {
                 // maxNumParticles 的作用域是本次按下创建的 ParticleSystem；满员时跳过发射。
                 const int cap = session->ring4Params.maxParticles;
                 const int budget = cap > 0
@@ -592,7 +579,7 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
                     m_bursts.push_back(std::move(inst));
                 }
             }
-            m_distAccum += remaining;
+            m_distAccum = emissions.remainder;
         }
     }
 
@@ -608,7 +595,8 @@ void BaClickFxEffect::pointerMotion(PointerMotionEvent *event)
 
     const auto t0 = logsFrames() ? std::chrono::steady_clock::now()
                                : std::chrono::steady_clock::time_point{};
-    m_pointerMotionWorks = true;
+    m_motionEventsWork = true;
+    ++m_pointerMotionEvents;
     ++m_inputEvents;
     updateDrag(event->position);
     if (logsFrames()) {
@@ -631,6 +619,7 @@ void BaClickFxEffect::endDrag()
         }
     }
     m_dragging = false;
+    m_autoTrailSession = false;
     // 保留已有拖尾点自然淡出，只清除后续路径连接状态。
     m_trailAccum = 0;
     m_distAccum = 0;
@@ -687,10 +676,32 @@ Region BaClickFxEffect::dirtyRegion(const Region &content) const
     if (content.isEmpty()) {
         return Region();
     }
-    // Region::grownBy 会逐矩形外扩后重新求并集。向上取整确保设备/逻辑换算中的
-    // 小数 Bloom 半径不被截短；再多 1px 覆盖双线性采样边界和 toAlignedRect。
-    const int pad = int(std::ceil(bloomPadding())) + 1;
-    return content.grownBy(QMargins(pad, pad, pad, pad));
+    Region dirty;
+    Region assigned;
+    for (const LogicalOutput *out : effects->screens()) {
+        if (!out) {
+            continue;
+        }
+        const Rect geometry = out->geometry();
+        const Region onOutput = content.intersected(geometry);
+        if (onOutput.isEmpty()) {
+            continue;
+        }
+        const QSize devicePx(int(std::lround(geometry.width() * out->scale())),
+                             int(std::lround(geometry.height() * out->scale())));
+        if (devicePx.isEmpty()) {
+            continue;
+        }
+        const int pad = int(std::ceil(GPURenderer::bloomReachPx(devicePx, out->scale()))) + 1;
+        dirty += onOutput.grownBy(QMargins(pad, pad, pad, pad)).intersected(geometry);
+        assigned += onOutput;
+    }
+    const Region unassigned = content.subtracted(assigned);
+    if (!unassigned.isEmpty()) {
+        const int pad = int(std::ceil(bloomPadding())) + 1;
+        dirty += unassigned.grownBy(QMargins(pad, pad, pad, pad));
+    }
+    return dirty;
 }
 
 void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
@@ -711,9 +722,18 @@ void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
     }
     m_lastFrame = now;
 
+    // 持续拖尾只在光标近期确实移动时保持发射；停止移动后结束会话，让已有轨迹按
+    // Unity 的 0.3 秒寿命自然淡出，避免空闲时永久维持重绘循环。
+    if (m_autoTrailSession
+        && std::chrono::steady_clock::now() - m_lastAutoTrailMotion
+            > std::chrono::milliseconds(50)) {
+        endDrag();
+    }
+
     // pointerMotion 可用时避免重复轮询；不转发该事件的后端使用 cursorPos() 回退。
-    if (m_dragging && !m_pointerMotionWorks) {
+    if (m_dragging && !m_motionEventsWork) {
         ++m_inputEvents;
+        ++m_fallbackSamples;
         updateDrag(effects->cursorPos());
     }
 
@@ -745,7 +765,8 @@ void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
     effects->prePaintScreen(data);
 }
 
-void BaClickFxEffect::logFrameStats(const Region &deviceRegion, double cpuMs)
+void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,
+                                    const Region &deviceRegion, double cpuMs)
 {
     // deviceRegion 使用设备像素坐标；逐矩形累加可排除分离区域之间的空白。
     double devicePx = 0.0;
@@ -775,6 +796,30 @@ void BaClickFxEffect::logFrameStats(const Region &deviceRegion, double cpuMs)
         }
     }
 
+    const RectF renderRect = viewport.renderRect();
+    const QRect alignedOutput = QRectF(renderRect.x(), renderRect.y(),
+                                       renderRect.width(), renderRect.height()).toAlignedRect();
+    const Rect outputLogical(alignedOutput.x(), alignedOutput.y(),
+                             alignedOutput.width(), alignedOutput.height());
+    const Region outputRequest = m_lastDirty.intersected(outputLogical);
+    const Region outputSource = m_lastContent.intersected(outputLogical);
+    const double outputScale2 = viewport.scale() * viewport.scale();
+    const Rect scaledOutput = viewport.scaledRenderRect();
+    const QString outputLabel = QStringLiteral("%1x%2@%3")
+        .arg(scaledOutput.width()).arg(scaledOutput.height()).arg(viewport.scale(), 0, 'f', 2);
+    OutputFrameStats &outputStats = m_outputFrameStats[outputLabel];
+    outputStats.frames++;
+    outputStats.devicePxSum += devicePx;
+    outputStats.deviceRects += deviceRegion.rects().size();
+    outputStats.requestRects += outputRequest.rects().size();
+    outputStats.sourceRects += outputSource.rects().size();
+    for (const Rect &r : outputRequest.rects()) {
+        outputStats.requestPxSum += double(r.width()) * double(r.height()) * outputScale2;
+    }
+    for (const Rect &r : outputSource.rects()) {
+        outputStats.sourcePxSum += double(r.width()) * double(r.height()) * outputScale2;
+    }
+
     const double gpuMs = m_gpu.lastGpuMs();
     const std::uint64_t gpuSerial = m_gpu.gpuSampleSerial();
     const double frameMs = m_statFrames > 0 && m_lastFrameDelta > 0.0 ? m_lastFrameDelta : 0.0;
@@ -795,6 +840,11 @@ void BaClickFxEffect::logFrameStats(const Region &deviceRegion, double cpuMs)
         m_statGpuBloomMsSum += m_gpu.lastGpuBloomMs();
         m_statGpuCompositeMsSum += m_gpu.lastGpuCompositeMs();
         m_statGpuSamples++;
+        OutputFrameStats &sampleOutput = m_outputFrameStats[m_gpu.lastGpuOutput()];
+        sampleOutput.gpuImportMsSum += m_gpu.lastGpuImportMs();
+        sampleOutput.gpuBloomMsSum += m_gpu.lastGpuBloomMs();
+        sampleOutput.gpuCompositeMsSum += m_gpu.lastGpuCompositeMs();
+        sampleOutput.gpuSamples++;
         m_lastGpuSampleSerial = gpuSerial;
     }
     m_statFrameMsSum += frameMs;
@@ -815,7 +865,7 @@ void BaClickFxEffect::logFrameStats(const Region &deviceRegion, double cpuMs)
         ? m_statGpuMsSum / double(m_statGpuSamples)
         : -1.0;
     const double gpuN = m_statGpuSamples > 0 ? double(m_statGpuSamples) : 1.0;
-    const baclickfx::FrameStatsSummary summary{
+    const baclickfx::FrameStatsSummary baseSummary{
         .frames = m_statFrames,
         .gpuSamples = m_statGpuSamples,
         .cpuAvgMs = m_statCpuMsSum / n,
@@ -845,13 +895,46 @@ void BaClickFxEffect::logFrameStats(const Region &deviceRegion, double cpuMs)
         .inputMerged = m_inputMerged,
         .inputDiscarded = m_inputDiscarded,
         .inputCrossScreen = m_inputCrossScreen,
+        .mouseChangedEvents = m_mouseChangedEvents,
+        .mouseChangedMotion = m_mouseChangedMotion,
+        .pointerMotionEvents = m_pointerMotionEvents,
+        .fallbackSamples = m_fallbackSamples,
+        .output = QString(),
+        .outputGpuImportMs = -1.0,
+        .outputGpuBloomMs = -1.0,
+        .outputGpuCompositeMs = -1.0,
+        .outputDeviceMpx = 0.0,
+        .outputRequestMpx = 0.0,
+        .outputSourceMpx = 0.0,
+        .outputDeviceRects = 0.0,
+        .outputRequestRects = 0.0,
+        .outputSourceRects = 0.0,
         .skipNoActivity = m_skipNoActivity,
         .skipNoDamage = m_skipNoDamage,
         .skipGpu = m_skipGpu,
         .skipTarget = m_skipTarget,
         .skipImport = m_skipImport,
     };
-    qCInfo(KWIN_BA_CLICK_FX).noquote() << baclickfx::formatFrameStats(summary);
+    for (auto it = m_outputFrameStats.cbegin(); it != m_outputFrameStats.cend(); ++it) {
+        baclickfx::FrameStatsSummary summary = baseSummary;
+        const OutputFrameStats &output = it.value();
+        const double outputN = output.frames > 0 ? double(output.frames) : 1.0;
+        const double outputGpuN = output.gpuSamples > 0 ? double(output.gpuSamples) : 1.0;
+        summary.output = it.key();
+        summary.outputGpuImportMs = output.gpuSamples > 0
+            ? output.gpuImportMsSum / outputGpuN : -1.0;
+        summary.outputGpuBloomMs = output.gpuSamples > 0
+            ? output.gpuBloomMsSum / outputGpuN : -1.0;
+        summary.outputGpuCompositeMs = output.gpuSamples > 0
+            ? output.gpuCompositeMsSum / outputGpuN : -1.0;
+        summary.outputDeviceMpx = output.devicePxSum / outputN / 1e6;
+        summary.outputRequestMpx = output.requestPxSum / outputN / 1e6;
+        summary.outputSourceMpx = output.sourcePxSum / outputN / 1e6;
+        summary.outputDeviceRects = double(output.deviceRects) / outputN;
+        summary.outputRequestRects = double(output.requestRects) / outputN;
+        summary.outputSourceRects = double(output.sourceRects) / outputN;
+        qCInfo(KWIN_BA_CLICK_FX).noquote() << baclickfx::formatFrameStats(summary);
+    }
 
     m_statFrames = 0;
     m_statCpuMsSum = m_statCpuMsMax = 0.0;
@@ -862,6 +945,8 @@ void BaClickFxEffect::logFrameStats(const Region &deviceRegion, double cpuMs)
     m_statFinishCpuMsSum = 0.0;
     m_inputCpuMsSinceLog = 0.0;
     m_inputEvents = m_inputAccepted = m_inputMerged = m_inputDiscarded = m_inputCrossScreen = 0;
+    m_mouseChangedEvents = m_mouseChangedMotion = 0;
+    m_pointerMotionEvents = m_fallbackSamples = 0;
     m_skipNoActivity = m_skipNoDamage = m_skipGpu = m_skipTarget = m_skipImport = 0;
     m_statGpuMsSum = m_statGpuMsMax = 0.0;
     m_statGpuImportMsSum = 0.0;
@@ -872,6 +957,7 @@ void BaClickFxEffect::logFrameStats(const Region &deviceRegion, double cpuMs)
     m_statFrameMsSum = m_statFrameMsMax = 0.0;
     m_statDevicePxSum = m_statRequestPxSum = m_statBloomSourcePxSum = 0.0;
     m_statDeviceRectsSum = m_statRequestRectsSum = m_statBloomSourceRectsSum = 0.0;
+    m_outputFrameStats.clear();
 }
 
 void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
@@ -911,15 +997,14 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
     renderGpu(renderTarget, viewport);
     const double cpuMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    logFrameStats(deviceRegion, cpuMs);
+    logFrameStats(viewport, deviceRegion, cpuMs);
     if (m_debugDamage) {
-        drawDebugDamage(renderTarget, viewport, deviceRegion);
+        drawDebugDamage(renderTarget, viewport);
     }
 }
 
 void BaClickFxEffect::drawDebugDamage(const RenderTarget &renderTarget,
-                                    const RenderViewport &viewport,
-                                    const Region &deviceRegion)
+                                      const RenderViewport &viewport)
 {
     GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
     GLShader *shader = ShaderManager::instance()->pushShader(
@@ -978,13 +1063,6 @@ void BaClickFxEffect::drawDebugDamage(const RenderTarget &renderTarget,
         drawRect(float(r.left()) * scale, float(r.top()) * scale,
                  float(r.right()) * scale, float(r.bottom()) * scale,
                  QVector4D(0.0f, 1.0f, 1.0f, 0.9f));
-    }
-
-    // deviceRegion 已经是 KWin 本帧实际使用的设备像素区域，逐矩形画，不能取
-    // boundingRect，否则恰好会掩盖我们想诊断的 Region 是否被扩大/合并的问题。
-    for (const Rect &r : deviceRegion.rects()) {
-        drawRect(float(r.x()), float(r.y()), float(r.x() + r.width()),
-                 float(r.y() + r.height()), QVector4D(1.0f, 0.0f, 1.0f, 0.8f));
     }
 
     glLineWidth(oldLineWidth);
@@ -1104,7 +1182,7 @@ void BaClickFxEffect::postPaintScreen()
         } else if (m_dragging) {
             // 拖动中但屏上暂时空着（例如关了拖尾、还没攒够一次连发）。
             // 这时没有任何区域需要重画，但必须让帧循环继续：光标位置是在
-            // prePaintScreen 里按帧轮询的（m_pointerMotionWorks 为 false 的后端），
+            // prePaintScreen 里按帧轮询的（m_motionEventsWork 为 false 的后端），
             // 一旦停帧就再也收不到移动，距离发射器和拖尾都会停在原地。
             // 请求 1×1 最小区域以维持下一帧输入轮询。
             const QPointF c = effects->cursorPos();
@@ -1124,15 +1202,21 @@ void BaClickFxEffect::postPaintScreen()
     effects->postPaintScreen();
 }
 
-void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &,
+void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos,
                                      Qt::MouseButtons buttons, Qt::MouseButtons oldButtons,
                                      Qt::KeyboardModifiers, Qt::KeyboardModifiers)
 {
+    ++m_mouseChangedEvents;
+    if (pos != oldPos) {
+        ++m_mouseChangedMotion;
+    }
     const bool wasDown = oldButtons & Qt::LeftButton;
     const bool isDown = buttons & Qt::LeftButton;
 
-    // 只处理按下/松开两个跃迁；移动交给 prePaintScreen 里的按帧轮询。
     if (!wasDown && isDown) {
+        if (m_dragging) {
+            endDrag();
+        }
         spawn(pos);
         startDrag(pos);
         // 从非活动状态切换后请求一个最小区域以启动帧循环；完整 Region 将由随后的
@@ -1140,6 +1224,25 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &,
         effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
     } else if (wasDown && !isDown) {
         endDrag();
+    } else if (pos != oldPos && (isDown || (m_alwaysTrail && trailEnabled()))) {
+        if (!m_dragging) {
+            startDrag(oldPos);
+            m_autoTrailSession = !isDown;
+            effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
+        }
+        if (!isDown) {
+            m_autoTrailSession = true;
+            m_lastAutoTrailMotion = std::chrono::steady_clock::now();
+        }
+        const auto t0 = logsFrames() ? std::chrono::steady_clock::now()
+                                     : std::chrono::steady_clock::time_point{};
+        m_motionEventsWork = true;
+        ++m_inputEvents;
+        updateDrag(pos);
+        if (logsFrames()) {
+            m_inputCpuMsSinceLog += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+        }
     }
 }
 

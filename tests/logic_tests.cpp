@@ -2,6 +2,7 @@
 
 #include "curveutils.h"
 #include "damageutils.h"
+#include "pathresampler.h"
 #include "subsystems.h"
 #include "trailstream.h"
 
@@ -24,6 +25,7 @@ private Q_SLOTS:
     void particleCapLimitsBurst();
     void damageQuantizationGrowsOutward();
     void layerProgressClampsLifetime();
+    void pathResamplingIsEventSegmentationInvariant();
 };
 
 void LogicTests::scalarCurveClampsAndInterpolates()
@@ -97,6 +99,20 @@ void LogicTests::layerProgressClampsLifetime()
     QCOMPARE(layerProgress(2.0, 1.0), 0.5);
     QCOMPARE(layerProgress(2.0, 3.0), 1.0);
     QCOMPARE(layerProgress(0.0, 0.0), 1.0);
+}
+
+void LogicTests::pathResamplingIsEventSegmentationInvariant()
+{
+    const auto one = baclickfx::resamplePathSegment(QPointF(0, 0), QPointF(25, 0), 5.0, 0.0);
+    const auto first = baclickfx::resamplePathSegment(QPointF(0, 0), QPointF(12, 0), 5.0, 0.0);
+    const auto second = baclickfx::resamplePathSegment(QPointF(12, 0), QPointF(25, 0), 5.0,
+                                                       first.remainder);
+    QCOMPARE(one.points.size(), std::size_t(5));
+    QCOMPARE(first.points.size() + second.points.size(), one.points.size());
+    for (std::size_t i = 0; i < one.points.size(); ++i) {
+        const QPointF point = i < first.points.size() ? first.points[i] : second.points[i - first.points.size()];
+        QCOMPARE(point, one.points[i]);
+    }
 }
 
 QTEST_APPLESS_MAIN(LogicTests)

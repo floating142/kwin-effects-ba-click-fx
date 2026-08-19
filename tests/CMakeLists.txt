@@ -7,6 +7,7 @@ add_executable(ba_click_fx_logic_tests
     ${CMAKE_SOURCE_DIR}/src/clickinstance.cpp
     ${CMAKE_SOURCE_DIR}/src/subsystems.cpp
     ${CMAKE_SOURCE_DIR}/src/damageutils.cpp
+    ${CMAKE_SOURCE_DIR}/src/pathresampler.cpp
 )
 
 target_include_directories(ba_click_fx_logic_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -9,7 +9,7 @@ build_dir="${1:-build/verify}"
 
 required_files=(
   LICENSE README.md TODO.md TESTING.md CMakeLists.txt
-  src/metadata.json src/damageutils.cpp src/damageutils.h
+  src/metadata.json src/damageutils.cpp src/damageutils.h src/pathresampler.cpp src/pathresampler.h
   config/CMakeLists.txt config/baclickfxconfig.cpp config/baclickfxconfig.h
   config/baclickfxconfig.ui tests/CMakeLists.txt tests/logic_tests.cpp
   assets/Cylinder002.obj

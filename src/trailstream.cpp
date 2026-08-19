@@ -123,9 +123,18 @@ std::vector<StrokeData> buildTrailStrokes(const TrailStream &stream,
                                           const QPointF &origin)
 {
     std::vector<StrokeData> out;
+    buildTrailStrokes(stream, trail, origin, out);
+    return out;
+}
+
+void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &trail,
+                       const QPointF &origin, std::vector<StrokeData> &out)
+{
+    std::size_t outputCount = 0;
     const std::vector<TrailPoint> &pts = stream.points();
     if (pts.size() < 2) {
-        return out;
+        out.clear();
+        return;
     }
 
     const double baseWidth = std::max(0.01, trail.widthPx);
@@ -144,7 +153,12 @@ std::vector<StrokeData> buildTrailStrokes(const TrailStream &stream,
             strokeEnd++;
         }
 
-        StrokeData data;
+        if (outputCount >= out.size()) {
+            out.emplace_back();
+        }
+        StrokeData &data = out[outputCount++];
+        data.samples.clear();
+        data.totalLength = 0.0;
         // 先累计整段长度，再按长度归一化采样宽度和颜色。
         for (std::size_t i = strokeStart + 1; i < strokeEnd; i++) {
             data.totalLength += QLineF(pts[i - 1].pos, pts[i].pos).length();
@@ -173,12 +187,13 @@ std::vector<StrokeData> buildTrailStrokes(const TrailStream &stream,
         }
 
         if (data.samples.size() >= 2) {
-            out.push_back(std::move(data));
+            // Keep the StrokeData and its sample capacity for the next output frame.
+        } else {
+            outputCount--;
         }
         strokeStart = strokeEnd;
     }
-
-    return out;
+    out.resize(outputCount);
 }
 
 // TrailStream

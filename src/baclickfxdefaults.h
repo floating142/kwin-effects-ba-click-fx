@@ -34,6 +34,9 @@ inline constexpr const char *kGlobalScale = "GlobalScale";
 /// 拖尾开关的配置键。
 inline constexpr const char *kEnableTrail = "EnableTrail";
 
+/// 无需按住鼠标即可产生拖尾的配置键。
+inline constexpr const char *kAlwaysTrail = "AlwaysTrail";
+
 /// 距离发射器开关的配置键。
 inline constexpr const char *kEnableDistanceEmitter = "EnableDistanceEmitter";
 
@@ -79,6 +82,9 @@ inline constexpr double kGlobalScaleMax = 5.0;
 
 /// 默认启用拖尾。
 inline constexpr bool kEnableTrailDefault = true;
+
+/// 默认仅在按住左键时产生拖尾。
+inline constexpr bool kAlwaysTrailDefault = false;
 
 /// 默认启用距离发射器。
 inline constexpr bool kEnableDistanceEmitterDefault = true;

@@ -94,7 +94,7 @@ if [[ "${PURGE_CONFIG}" -eq 1 ]]; then
   if command -v kwriteconfig6 >/dev/null 2>&1; then
     echo "==> 删除用户配置"
     kwriteconfig6 --file kwinrc --group Plugins --key "${EFFECT_ID}Enabled" --delete
-    for key in TimeScale GlobalScale EnableTrail EnableDistanceEmitter LogLevel DebugDamage; do
+    for key in TimeScale GlobalScale EnableTrail AlwaysTrail EnableDistanceEmitter LogLevel DebugDamage; do
       kwriteconfig6 --file kwinrc --group "${CONFIG_GROUP}" --key "${key}" --delete
     done
   else

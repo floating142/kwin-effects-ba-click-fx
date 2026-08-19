@@ -15,6 +15,7 @@
 #include <effect/effect.h>
 
 #include <QLoggingCategory>
+#include <QHash>
 #include <QPointF>
 
 #include <chrono>
@@ -75,9 +76,8 @@ private:
      */
     bool renderGpu(const RenderTarget &renderTarget, const RenderViewport &viewport);
 
-    /// 绘制 damage 诊断叠层；青色为申请区域，洋红色为 KWin 实际绘制区域。
-    void drawDebugDamage(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                         const Region &deviceRegion);
+    /// 绘制 damage 诊断叠层；青色为插件申请区域。
+    void drawDebugDamage(const RenderTarget &renderTarget, const RenderViewport &viewport);
 
     /// 返回不含 Bloom 外扩的保守稀疏内容区域，使用全局逻辑坐标。
     Region contentRegion() const;
@@ -124,6 +124,8 @@ private:
     baclickfx::defaults::LogLevel m_logLevel = baclickfx::defaults::kLogLevelDefault;
     bool m_debugDamage = false;
     bool m_dragging = false;
+    bool m_autoTrailSession = false;
+    std::chrono::steady_clock::time_point m_lastAutoTrailMotion;
     double m_timeScale = 1.0;
     double m_globalScale = 1.0;
     // 当前参数表对应的输出逻辑高度；0 表示尚未构建。
@@ -133,6 +135,7 @@ private:
 
     // 功能开关；Unity 已定义的视觉常量不提供配置项。
     bool m_enableTrail = true;
+    bool m_alwaysTrail = false;
     bool m_enableDistanceEmitter = true;
 
     // 配置重建参数表时会先清空所有依赖旧参数的实例。
@@ -169,8 +172,8 @@ private:
     // 帧时钟；0 表示第一帧仅建立时间基准。
     std::chrono::nanoseconds m_lastFrame{0};
 
-    // 收到 pointerMotion 后停止帧级 cursorPos() 回退采样。
-    bool m_pointerMotionWorks = false;
+    // 收到 pointerMotion 或 mouseChanged 移动通知后停止帧级 cursorPos() 回退采样。
+    bool m_motionEventsWork = false;
 
     // 以下区域均使用全局逻辑坐标。缓存结果可确保预绘制、背景导入、Bloom 和最终
     // 合成使用同一个模拟快照。
@@ -192,7 +195,22 @@ private:
 
     // 性能统计状态，仅在帧统计级别及以上更新。记录 CPU 分段、异步 GPU 计时、呈现
     // 间隔，以及插件申请区域与 KWin 实际重绘区域的差异。
-    void logFrameStats(const Region &deviceRegion, double cpuMs);
+    void logFrameStats(const RenderViewport &viewport, const Region &deviceRegion, double cpuMs);
+
+    struct OutputFrameStats
+    {
+        int frames = 0;
+        int gpuSamples = 0;
+        double gpuImportMsSum = 0.0;
+        double gpuBloomMsSum = 0.0;
+        double gpuCompositeMsSum = 0.0;
+        double devicePxSum = 0.0;
+        double requestPxSum = 0.0;
+        double sourcePxSum = 0.0;
+        int deviceRects = 0;
+        int requestRects = 0;
+        int sourceRects = 0;
+    };
 
     // 上一次呈现间隔，单位为毫秒。
     double m_lastFrameDelta = 0.0;
@@ -204,11 +222,16 @@ private:
     double m_lastParticleCpuMs = 0.0;
     double m_lastFinishCpuMs = 0.0;
     double m_inputCpuMsSinceLog = 0.0;
+    QHash<QString, OutputFrameStats> m_outputFrameStats;
     std::uint64_t m_inputEvents = 0;
     std::uint64_t m_inputAccepted = 0;
     std::uint64_t m_inputMerged = 0;
     std::uint64_t m_inputDiscarded = 0;
     std::uint64_t m_inputCrossScreen = 0;
+    std::uint64_t m_mouseChangedEvents = 0;
+    std::uint64_t m_mouseChangedMotion = 0;
+    std::uint64_t m_pointerMotionEvents = 0;
+    std::uint64_t m_fallbackSamples = 0;
     std::uint64_t m_skipNoActivity = 0;
     std::uint64_t m_skipNoDamage = 0;
     std::uint64_t m_skipGpu = 0;

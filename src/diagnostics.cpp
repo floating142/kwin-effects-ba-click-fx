@@ -48,6 +48,27 @@ QString formatFrameStats(const FrameStatsSummary &s)
               .arg(s.inputMerged)
               .arg(s.inputDiscarded)
               .arg(s.inputCrossScreen)
+        + QStringLiteral(" output=\"%1\" output_gpu_import_ms=%2 output_gpu_bloom_ms=%3 "
+                         "output_gpu_composite_ms=%4 output_device_mpx=%5 output_request_mpx=%6 "
+                         "output_source_mpx=%7 output_device_rects=%8 output_request_rects=%9 "
+                         "output_source_rects=%10")
+              .arg(s.output)
+              .arg(s.outputGpuImportMs, 0, 'f', 3)
+              .arg(s.outputGpuBloomMs, 0, 'f', 3)
+              .arg(s.outputGpuCompositeMs, 0, 'f', 3)
+              .arg(s.outputDeviceMpx, 0, 'f', 3)
+              .arg(s.outputRequestMpx, 0, 'f', 3)
+              .arg(s.outputSourceMpx, 0, 'f', 3)
+              .arg(s.outputDeviceRects, 0, 'f', 2)
+              .arg(s.outputRequestRects, 0, 'f', 2)
+              .arg(s.outputSourceRects, 0, 'f', 2)
+        + QStringLiteral(" mouse_changed_events=%1 mouse_changed_motion=%2 "
+                         "pointer_motion_events=%3 fallback_samples=%4 no_motion_samples=%5")
+              .arg(s.mouseChangedEvents)
+              .arg(s.mouseChangedMotion)
+              .arg(s.pointerMotionEvents)
+              .arg(s.fallbackSamples)
+              .arg(s.inputDiscarded)
         + QStringLiteral(" skip_no_activity=%1 skip_no_damage=%2 skip_gpu=%3 "
                          "skip_target=%4 skip_import=%5")
               .arg(s.skipNoActivity)
