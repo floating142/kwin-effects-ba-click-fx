@@ -227,7 +227,9 @@ private:
         // 使用 QRectF 以确保边界语义与后续 Qt 几何计算一致。
         QRectF renderRect;  // 全局逻辑矩形和缓存键。
         double scale = 1.0; // 输出缩放和缓存键。
-        QSize devicePx;     // `viewport.scaledRenderRect().size()`。
+        QSize devicePx;     // 私有纹理尺寸，保持输出的逻辑方向。
+        QSize renderTargetDevicePx; // 旋转后的目标设备尺寸和缓存键。
+        int transformKind = 0;       // OutputTransform::Kind 和缓存键。
 
         // 纹理声明在 FBO 之前，确保成员逆序析构时颜色附件最后释放。
         std::unique_ptr<GLTexture> hdrTexture;

@@ -433,13 +433,17 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
     // 使用 KWin 已缩放并取整的 scaledRenderRect()，确保纹理尺寸与投影矩阵一致。
     const Rect sr = viewport.scaledRenderRect();
     const QSize devicePx(sr.width(), sr.height());
+    const QSize renderTargetDevicePx = viewport.deviceSize();
+    const int transformKind = int(viewport.transform().kind());
     if (devicePx.isEmpty()) {
         return false;
     }
 
     // 输出数量有限，线性查找可避免额外缓存结构。
     for (const auto &t : m_outputs) {
-        if (t->renderRect == outputRect && qFuzzyCompare(t->scale, scale)) {
+        if (t->renderRect == outputRect && qFuzzyCompare(t->scale, scale)
+            && t->renderTargetDevicePx == renderTargetDevicePx
+            && t->transformKind == transformKind) {
             m_current = t.get();
             return true;
         }
@@ -456,6 +460,8 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
     targets->renderRect = outputRect;
     targets->scale = scale;
     targets->devicePx = devicePx;
+    targets->renderTargetDevicePx = renderTargetDevicePx;
+    targets->transformKind = transformKind;
 
     // 创建线性 RGBA16F 场景纹理及其帧缓冲。
     targets->hdrTexture = GLTexture::allocate(GL_RGBA16F, devicePx, 1);
@@ -903,13 +909,12 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         quads.clear();
         quads.reserve(std::size_t(importRegion.rects().size()) * 6);
         const QSize sourceSize = backgroundSource->size();
-        const QMatrix4x4 textureMatrix = backgroundSource->matrix(NormalizedCoordinates);
         const auto directUv = [&](const QPointF &logical) {
-            const QPointF p = viewport.mapToRenderTargetTexture(logical);
-            const QVector4D uv = textureMatrix
-                * QVector4D(float(p.x() / sourceSize.width()),
-                            float(p.y() / sourceSize.height()), 0.0f, 1.0f);
-            return QPointF(uv.x(), uv.y());
+            // 旋转输出的实际 RenderTarget 可能交换宽高。先映射到实际目标，
+            // 再显式转换为 OpenGL 左下原点 UV，避免同时叠加 KWin 变换和纹理矩阵。
+            const QPointF p = viewport.mapToRenderTarget(logical);
+            return QPointF(p.x() / sourceSize.width(),
+                           1.0 - p.y() / sourceSize.height());
         };
         for (const Rect &rect : importRegion.rects()) {
             const float l = static_cast<float>(rect.left() - outRect.left());
@@ -1467,12 +1472,12 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     composite->setUniform("u_sampleScale", m_current->bloomSampleScale);
     glActiveTexture(GL_TEXTURE0);
 
-    // RenderViewport 投影矩阵使用缩放后的设备像素坐标，因此合成顶点也必须使用
-    // 设备像素。不能调用 viewport.mapToRenderTarget()，否则会重复减去输出原点。
-    // compositeRegion 将片元处理限制在实际重绘区域，所有矩形合并为一次 VBO 提交。
+    // RenderViewport::projectionMatrix() 已经包含 OutputTransform，顶点保持缩放后的
+    // 全局逻辑坐标即可。这里若再调用 mapToRenderTarget()，旋转会被应用两次，90°
+    // 输出最终表现为特效位置与鼠标上下镜像。
     const float scale = static_cast<float>(viewport.scale());
 
-    // 投影坐标 y 轴向下，而帧缓冲纹理坐标 y 轴向上，因此输出顶边对应 v=1。
+    // 投影坐标 y 轴向下，而私有帧缓冲纹理坐标 y 轴向上，因此逻辑顶边对应 v=1。
     std::vector<ParticleVertex> &quads = m_regionQuads;
     quads.clear();
     quads.reserve(std::size_t(compositeRegion.rects().size()) * 6);
