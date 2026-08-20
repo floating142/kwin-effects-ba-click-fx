@@ -6,9 +6,19 @@
 
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+用法 / Usage: ./uninstall-local.sh [options]
+
+  --system       卸载系统安装 / Remove system installation (default)
+  --user         卸载用户安装 / Remove user installation
+  --purge-config 同时删除配置 / Also remove saved settings
+  -h, --help     显示帮助 / Show help
+EOF
+}
+
 if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
-  echo "请不要用 sudo 跑整个脚本，直接执行即可：" >&2
-  echo "  ./uninstall-local.sh ${*:-}" >&2
+  echo "请以普通用户运行 / Run as your normal user." >&2
   exit 2
 fi
 
@@ -24,7 +34,8 @@ for arg in "$@"; do
     --user) MODE="user" ;;
     --system) MODE="system" ;;
     --purge-config) PURGE_CONFIG=1 ;;
-    *) echo "未知参数: ${arg}" >&2; exit 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "未知参数 / Unknown option: ${arg}" >&2; usage >&2; exit 2 ;;
   esac
 done
 
@@ -55,7 +66,7 @@ if [[ -n "${QDBUS}" ]]; then
   "${QDBUS}" org.kde.KWin /Effects unloadEffect "${EFFECT_ID}" >/dev/null 2>&1 || true
 fi
 
-echo "==> 卸载 ${MODE} 安装"
+echo "==> 卸载 / Uninstall: ${MODE}"
 if [[ "${MODE}" == "system" ]]; then
   sudo -v
 fi
@@ -66,7 +77,8 @@ while IFS= read -r installed; do
   case "${installed}" in
     "${PLUGIN_DIR}/kwin/effects/plugins/${EFFECT_ID}.so" | \
     "${PLUGIN_DIR}/kwin/effects/configs/${CONFIG_ID}.so" | \
-    "${ASSET_ROOT}/"*) ;;
+    "${ASSET_ROOT}/"* | \
+    */share/locale/zh_CN/LC_MESSAGES/kwin_ba_click_fx_config.mo) ;;
     *)
       echo "安装清单包含非预期路径，已停止：${installed}" >&2
       exit 1
@@ -102,4 +114,5 @@ if [[ "${PURGE_CONFIG}" -eq 1 ]]; then
   fi
 fi
 
-echo "卸载完成。若该效果此前已加载，请注销 Plasma 会话以释放已映射的插件。"
+echo "卸载完成 / Uninstall complete."
+echo "若效果此前已加载，请注销 Plasma / Log out if the effect was previously loaded."

@@ -8,7 +8,8 @@ cd "${src_dir}"
 build_dir="${1:-build/verify}"
 
 required_files=(
-  LICENSE README.md TODO.md TESTING.md CMakeLists.txt
+  LICENSE README.md README.en.md TODO.md TESTING.md CMakeLists.txt
+  po/zh_CN/kwin_ba_click_fx_config.po
   src/metadata.json src/damageutils.cpp src/damageutils.h src/pathresampler.cpp src/pathresampler.h
   config/CMakeLists.txt config/baclickfxconfig.cpp config/baclickfxconfig.h
   config/baclickfxconfig.ui tests/CMakeLists.txt tests/logic_tests.cpp
@@ -94,6 +95,7 @@ if [[ -f "${build_dir}/cmake_install.cmake"
     particle.vert transfer.glsl additive.frag alphablend_add.frag
     background.frag bloom_downsample.frag bloom_prefilter.frag
     bloom_upsample.frag composite.frag dissolve.frag
+    kwin_ba_click_fx_config.mo
   )
   for name in "${installed_names[@]}"; do
     if ! find "${stage_dir}/root" -type f -name "${name}" -print -quit | rg -q .; then

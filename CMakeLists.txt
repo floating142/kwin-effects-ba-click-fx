@@ -50,6 +50,7 @@ message(STATUS "BA Click FX build id: ${BA_CLICK_FX_BUILD_ID}")
 
 add_subdirectory(src)
 add_subdirectory(config)
+ki18n_install(po)
 
 include(CTest)
 if(BUILD_TESTING)

@@ -1,0 +1,94 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: kwin-effects-ba-click-fx\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Global"
+msgstr "全局"
+
+msgid "Time scale:"
+msgstr "时间缩放："
+
+msgid "Below 1 slows down, above 1 speeds up the effect"
+msgstr "小于 1 放慢、大于 1 加快整套特效"
+
+msgid "Overall size:"
+msgstr "整体尺寸："
+
+msgid "Scale all elements"
+msgstr "放大或缩小全部图元"
+
+msgid "Trail"
+msgstr "拖尾"
+
+msgid "Enable trail"
+msgstr "启用拖尾"
+
+msgid "Show a ribbon while dragging with the left button"
+msgstr "按住左键拖动时产生 ribbon 光带"
+
+msgid "Always show trail"
+msgstr "始终显示拖尾"
+
+msgid "Show trail during pointer movement; may increase GPU usage"
+msgstr "光标移动时持续显示拖尾，可能增加 GPU 占用"
+
+msgid "Enable distance particles"
+msgstr "启用沿途小三角"
+
+msgid "Emit triangles by traveled distance"
+msgstr "拖动时按累计路程连发小三角"
+
+msgid "Log level:"
+msgstr "日志级别："
+
+msgid "Off"
+msgstr "关闭"
+
+msgid "Errors"
+msgstr "错误"
+
+msgid "Instances"
+msgstr "实例"
+
+msgid "Frame stats"
+msgstr "帧统计"
+
+msgid "Verbose"
+msgstr "详细调试"
+
+msgid "Show damage borders"
+msgstr "显示重绘区域边框"
+
+msgid "Show requested regions; disable for performance tests"
+msgstr "显示特效申请区域；性能测试时建议关闭"
+
+msgid "Copy diagnostics"
+msgstr "复制诊断信息"
+
+msgid "Copy plugin, GPU, output and resource status"
+msgstr "复制当前插件、GPU、输出和资源路径状态"
+
+msgid "Generate report"
+msgstr "生成诊断报告"
+
+msgid "Save status and recent logs to the diagnostics cache"
+msgstr "将当前状态和近期日志保存到诊断缓存目录"
+
+msgid "Open diagnostics folder"
+msgstr "打开诊断目录"
+
+msgid "Open the diagnostics cache folder"
+msgstr "打开诊断报告的缓存目录"
+
+msgid "Copied"
+msgstr "已复制"
+
+msgid "Failed"
+msgstr "失败"
+
+msgid "Generated"
+msgstr "已生成"

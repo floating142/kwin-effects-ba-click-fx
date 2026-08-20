@@ -40,6 +40,7 @@ K_PLUGIN_CLASS(BaClickFxEffectConfig)
 BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaData &data)
     : KCModule(parent, data)
 {
+    KLocalizedString::setApplicationDomain(QByteArrayLiteral("kwin_ba_click_fx_config"));
     // setupUi() 负责为 KCModule 页面安装布局。
     m_ui.setupUi(widget());
 
@@ -84,9 +85,9 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
             const QDBusPendingReply<QString> reply = *call;
             if (!reply.isError() && !reply.value().isEmpty()) {
                 QApplication::clipboard()->setText(reply.value());
-                m_ui.copyDiagnosticsButton->setText(i18n("已复制诊断信息"));
+                m_ui.copyDiagnosticsButton->setText(i18n("Copied"));
             } else {
-                m_ui.copyDiagnosticsButton->setText(i18n("无法获取诊断信息"));
+                m_ui.copyDiagnosticsButton->setText(i18n("Failed"));
             }
             call->deleteLater();
         });
@@ -130,10 +131,10 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
                     if (journal.waitForFinished(3000)) {
                         report.write(journal.readAllStandardOutput());
                     }
-                    m_ui.generateDiagnosticsButton->setText(i18n("诊断报告已生成"));
+                    m_ui.generateDiagnosticsButton->setText(i18n("Generated"));
                 }
             } else {
-                m_ui.generateDiagnosticsButton->setText(i18n("无法生成诊断报告"));
+                m_ui.generateDiagnosticsButton->setText(i18n("Failed"));
             }
             call->deleteLater();
         });

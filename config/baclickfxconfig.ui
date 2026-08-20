@@ -24,14 +24,14 @@
    <item>
     <widget class="QGroupBox" name="globalGroupBox">
      <property name="title">
-      <string>全局</string>
+      <string>Global</string>
      </property>
      <layout class="QFormLayout" name="globalFormLayout">
 
       <item row="0" column="0">
        <widget class="QLabel" name="timeScaleLabel">
         <property name="text">
-         <string>时间缩放：</string>
+         <string>Time scale:</string>
         </property>
        </widget>
       </item>
@@ -52,7 +52,7 @@
            <enum>Qt::Horizontal</enum>
           </property>
           <property name="toolTip">
-           <string>小于 1 放慢、大于 1 加快整套特效</string>
+           <string>Below 1 slows down, above 1 speeds up the effect</string>
           </property>
          </widget>
         </item>
@@ -72,7 +72,7 @@
       <item row="1" column="0">
        <widget class="QLabel" name="globalScaleLabel">
         <property name="text">
-         <string>整体尺寸：</string>
+         <string>Overall size:</string>
         </property>
        </widget>
       </item>
@@ -93,7 +93,7 @@
            <enum>Qt::Horizontal</enum>
           </property>
           <property name="toolTip">
-           <string>放大或缩小全部图元</string>
+           <string>Scale all elements</string>
           </property>
          </widget>
         </item>
@@ -118,34 +118,34 @@
    <item>
     <widget class="QGroupBox" name="trailGroupBox">
      <property name="title">
-      <string>拖尾</string>
+      <string>Trail</string>
      </property>
      <layout class="QFormLayout" name="trailFormLayout">
 
       <item row="0" column="0" colspan="2">
        <widget class="QCheckBox" name="enableTrailCheckBox">
         <property name="text">
-         <string>启用拖尾</string>
+         <string>Enable trail</string>
         </property>
         <property name="checked">
          <bool>true</bool>
         </property>
         <property name="toolTip">
-         <string>按住左键拖动时产生 ribbon 光带</string>
+         <string>Show a ribbon while dragging with the left button</string>
         </property>
        </widget>
       </item>
       <item row="1" column="0" colspan="2">
        <widget class="QCheckBox" name="alwaysTrailCheckBox">
-        <property name="text"><string>无需按住鼠标</string></property>
-        <property name="toolTip"><string>光标移动时持续显示拖尾，可能增加 GPU 占用</string></property>
+        <property name="text"><string>Always show trail</string></property>
+        <property name="toolTip"><string>Show trail during pointer movement; may increase GPU usage</string></property>
        </widget>
       </item>
       <item row="2" column="0" colspan="2">
        <widget class="QCheckBox" name="enableDistanceEmitterCheckBox">
-        <property name="text"><string>启用沿途小三角</string></property>
+        <property name="text"><string>Enable distance particles</string></property>
         <property name="checked"><bool>true</bool></property>
-        <property name="toolTip"><string>拖动时按累计路程连发小三角，对应 Unity 的 rateOverDistance（每 36 逻辑像素一个）</string></property>
+        <property name="toolTip"><string>Emit triangles by traveled distance</string></property>
        </widget>
       </item>
 
@@ -158,16 +158,16 @@
     <layout class="QHBoxLayout" name="logLevelLayout">
      <item>
       <widget class="QLabel" name="logLevelLabel">
-       <property name="text"><string>日志级别：</string></property>
+       <property name="text"><string>Log level:</string></property>
       </widget>
      </item>
      <item>
-      <widget class="QComboBox" name="logLevelComboBox">
-       <item><property name="text"><string>关闭</string></property></item>
-       <item><property name="text"><string>错误</string></property></item>
-       <item><property name="text"><string>实例</string></property></item>
-       <item><property name="text"><string>帧统计</string></property></item>
-       <item><property name="text"><string>详细调试</string></property></item>
+       <widget class="QComboBox" name="logLevelComboBox">
+       <item><property name="text"><string>Off</string></property></item>
+       <item><property name="text"><string>Errors</string></property></item>
+       <item><property name="text"><string>Instances</string></property></item>
+       <item><property name="text"><string>Frame stats</string></property></item>
+       <item><property name="text"><string>Verbose</string></property></item>
       </widget>
      </item>
     </layout>
@@ -176,10 +176,10 @@
    <item>
     <widget class="QCheckBox" name="debugDamageCheckBox">
      <property name="text">
-      <string>显示重绘区域边框</string>
+      <string>Show damage borders</string>
      </property>
      <property name="toolTip">
-      <string>显示特效申请区域；性能测试时建议关闭</string>
+      <string>Show requested regions; disable for performance tests</string>
      </property>
     </widget>
    </item>
@@ -187,28 +187,28 @@
    <item>
    <widget class="QPushButton" name="copyDiagnosticsButton">
      <property name="text">
-      <string>复制诊断信息</string>
+      <string>Copy diagnostics</string>
      </property>
      <property name="toolTip">
-      <string>复制当前插件、GPU、输出和资源路径状态</string>
+       <string>Copy plugin, GPU, output and resource status</string>
      </property>
    </widget>
   </item>
 
    <item>
     <widget class="QPushButton" name="generateDiagnosticsButton">
-     <property name="text"><string>生成诊断报告</string></property>
-     <property name="toolTip"><string>将当前状态和近期日志保存到诊断缓存目录</string></property>
+     <property name="text"><string>Generate report</string></property>
+     <property name="toolTip"><string>Save status and recent logs to the diagnostics cache</string></property>
     </widget>
    </item>
 
    <item>
     <widget class="QPushButton" name="openDiagnosticsDirButton">
      <property name="text">
-      <string>打开诊断目录</string>
+      <string>Open diagnostics folder</string>
      </property>
      <property name="toolTip">
-      <string>打开诊断报告的缓存目录</string>
+      <string>Open the diagnostics cache folder</string>
      </property>
     </widget>
    </item>

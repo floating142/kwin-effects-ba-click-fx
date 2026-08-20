@@ -2,6 +2,8 @@
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 
+English documentation: [README.en.md](README.en.md)
+
 **从 Blue Archive Unity UI/FX_Touch 逐参数移植的 KDE Plasma KWin 点击特效与光标拖尾插件。**
 
 `kwin-effects-ba-click-fx` 将 `FX_Touch` 中 ParticleSystem、TrailRenderer 与后处理参数逐项还原到 KWin：点击时播放中心圆盘、溶解圆环和 Ring3 粒子，按住左键拖动时生成 Ribbon 拖尾与 Ring4 距离发射粒子。渲染由原生 C++ / OpenGL 完成，使用线性 RGBA16F Scene 和 Unity PPv2 MXFinalBloom，不依赖脚本运行时。
@@ -33,17 +35,39 @@ KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。升级 KWin 后必
 
 ## 安装
 
-系统级安装：
+需要 C++ 编译器、CMake、ECM、Qt 6、KF6、KWin 和 OpenGL 开发文件。
+
+Arch Linux：
+
+```bash
+sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin
+```
+
+Fedora：
+
+```bash
+sudo dnf install -y cmake extra-cmake-modules kwin-devel
+```
+
+在项目目录运行：
 
 ```bash
 ./install-local.sh --system
 ```
 
-不要使用 `sudo ./install-local.sh`。脚本只在安装步骤内部调用 `sudo`，其余 D-Bus 操作必须连接当前用户的 KWin 会话。
+请以当前用户运行脚本；安装到 `/usr` 时，脚本会自行请求管理员权限。安装后在「系统设置 → 外观与样式 → 桌面特效」中搜索 **BA Click FX** 并启用。首次安装或升级 KWin 后若未出现，注销并重新登录 Plasma。
 
-脚本会完成配置、编译、安装和 effect 实例重建。首次安装新 native plugin 时，当前 KWin 进程可能尚未发现它；按脚本提示重新登录 Plasma，或重启 KWin Wayland 会话后再启用。
+常用选项：
 
-安装后打开「系统设置 → 外观与样式 → 桌面特效」，搜索 **BA Click FX** 或 **蔚蓝档案点击特效** 并启用。右侧配置按钮提供：
+```bash
+JOBS=4 ./install-local.sh --system
+./install-local.sh --no-reload
+./install-local.sh --help
+```
+
+KWin 原生插件与当前 KWin 版本绑定；升级 KWin 后需要重新编译本插件。
+
+右侧配置按钮提供：
 
 - 时间缩放
 - 整体尺寸
@@ -54,13 +78,13 @@ KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。升级 KWin 后必
 
 颜色、粒子数量、拖尾宽度、发射间距和 Bloom 参数保持 Unity 原始值，不作为用户调节项。
 
-卸载系统级安装：
+卸载：
 
 ```bash
 ./uninstall-local.sh --system
 ```
 
-卸载用户级安装时使用 `--user`。默认保留效果配置；如需同时删除配置和启用状态，追加 `--purge-config`。
+用户级安装使用 `./uninstall-local.sh --user`。默认保留配置；追加 `--purge-config` 可同时删除配置和启用状态。
 
 ## 测试与兼容性
 

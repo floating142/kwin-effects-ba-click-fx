@@ -239,6 +239,8 @@ private:
         std::unique_ptr<GLFramebuffer> bgFbo;
 
         std::vector<BloomLevel> bloomLevels;
+        std::vector<Region> downRegions;
+        std::vector<Region> upRegions;
 
         // 跨非活动时段保留，确保下次激活时刷新私有 FBO 中的旧内容。
         Region previousCompositeRegion;
@@ -273,6 +275,7 @@ private:
     std::vector<QPointF> m_trailNormals;
     std::vector<QPointF> m_trailDirs;
     std::vector<ParticleVertex> m_trailStrip;
+    std::vector<ParticleVertex> m_regionQuads;
 
     // 当前帧从输出局部坐标到标准化设备坐标的投影矩阵。
     QMatrix4x4 m_projection;
@@ -331,6 +334,7 @@ private:
     QString m_gpuVendor;
     QString m_gpuRenderer;
     QString m_gpuVersion;
+    bool m_lastImportDirect = false;
 };
 
 } // namespace KWin

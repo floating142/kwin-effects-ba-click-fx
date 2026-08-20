@@ -170,9 +170,10 @@ Region mapTextureRegion(const Region &sourceRegion, const QSize &sourceSize,
     return Region::fromUnsortedRects(mapped);
 }
 
-std::vector<ParticleVertex> textureRegionQuads(const Region &region, const QSize &size)
+void textureRegionQuads(const Region &region, const QSize &size,
+                        std::vector<ParticleVertex> &vertices)
 {
-    std::vector<ParticleVertex> vertices;
+    vertices.clear();
     vertices.reserve(std::size_t(region.rects().size()) * 6);
     for (const Rect &r : region.rects()) {
         const float uLeft = float(r.left()) / size.width();
@@ -193,7 +194,6 @@ std::vector<ParticleVertex> textureRegionQuads(const Region &region, const QSize
             {left, top, uLeft, vTop, 1, 1, 1, 1},
         });
     }
-    return vertices;
 }
 
 // 从标准数据目录定位已安装的资源文件。
@@ -345,7 +345,7 @@ QString GPURenderer::diagnosticStatus() const
                              .arg(bloomSizes.join(QLatin1Char('|'))));
     }
     return QStringLiteral("gpu_vendor=\"%1\" gpu_renderer=\"%2\" gpu_version=\"%3\" "
-                          "textures_ready=%4 shaders_ready=%5 targets=\"%6\"")
+                          "textures_ready=%4 shaders_ready=%5 import_mode=%6 targets=\"%7\"")
         .arg(m_gpuVendor.isEmpty() ? QStringLiteral("uninitialized") : m_gpuVendor)
         .arg(m_gpuRenderer.isEmpty() ? QStringLiteral("uninitialized") : m_gpuRenderer)
         .arg(m_gpuVersion.isEmpty() ? QStringLiteral("uninitialized") : m_gpuVersion)
@@ -353,6 +353,7 @@ QString GPURenderer::diagnosticStatus() const
         .arg(bool(m_shaderBackground && m_shaderAlphablendAdd && m_shaderDissolve
                   && m_shaderAdditive && m_shaderComposite && m_shaderBloomPrefilter
                   && m_shaderBloomDownsample && m_shaderBloomUpsample))
+        .arg(m_lastImportDirect ? QStringLiteral("direct") : QStringLiteral("blit"))
         .arg(outputs.join(QLatin1Char(',')));
 }
 
@@ -471,22 +472,6 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
         return false;
     }
 
-    // 屏幕缓冲先复制到同尺寸背景纹理，再由背景着色器解码到 hdrFbo。
-    targets->bgTexture = GLTexture::allocate(GL_RGBA16F, devicePx, 1);
-    if (!targets->bgTexture || targets->bgTexture->isNull()) {
-        GPU_ERROR() << "code=background_texture_alloc_failed" << devicePx;
-        return false;
-    }
-    // 线性过滤可平滑分数缩放下区域边缘的半像素取整误差。
-    targets->bgTexture->setFilter(GL_LINEAR);
-    targets->bgTexture->setWrapMode(GL_CLAMP_TO_EDGE);
-
-    targets->bgFbo = std::make_unique<GLFramebuffer>(targets->bgTexture.get());
-    if (!targets->bgFbo->valid()) {
-        GPU_ERROR() << "code=background_fbo_failed";
-        return false;
-    }
-
     // 辉光金字塔分配失败时仅关闭辉光，保留粒子渲染。
     if (!prepareBloomPyramid(*targets, devicePx)) {
         targets->bloomLevels.clear();
@@ -506,7 +491,9 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
         GLFramebuffer::popFramebuffer();
     };
     clearFbo(targets->hdrFbo.get());
-    clearFbo(targets->bgFbo.get());
+    if (targets->bgFbo) {
+        clearFbo(targets->bgFbo.get());
+    }
     for (BloomLevel &level : targets->bloomLevels) {
         clearFbo(level.downFbo.get());
         clearFbo(level.upFbo.get());
@@ -812,45 +799,63 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
     // 区域和颜色空间判据计算完成后再开始 GPU 查询，避免计入 CPU 区域运算。
     beginGpuTimerPhase(GpuTimerPhase::Import);
 
-    // blitFromRenderTarget() 从当前 KWin 输出帧缓冲读取，因此复制必须发生在绑定
-    // 私有 HDR 帧缓冲之前，避免读取上一帧场景纹理形成反馈。
-    QList<Rect> importedRects;
-    importedRects.reserve(importRegion.rects().size());
-    for (const Rect &logicalRect : importRegion.rects()) {
-        // 仅复制需要的逻辑区域；输出旋转、翻转和 renderOffset 由
-        // blitFromRenderTarget() 处理，目标区域映射到输出局部设备像素。
-        const QRect aligned = QRect(logicalRect.x(), logicalRect.y(),
-                                    logicalRect.width(), logicalRect.height())
-                                  .intersected(outRect.toAlignedRect());
-        if (aligned.isEmpty()) {
-            continue;
-        }
-        const Rect srcLogical(aligned.x(), aligned.y(), aligned.width(), aligned.height());
-        // 使用与 RenderViewport::mapToRenderTarget() 相同的取整方式，保持源目标一一
-        // 对应，并确保相邻矩形共享同一设备像素边界。
-        const Rect scaledSource = srcLogical.scaled(viewport.scale()).rounded();
-        const Rect dstDevice = scaledSource.translated(-viewport.scaledRenderRect().topLeft());
+    GLTexture *sourceTexture = renderTarget.texture();
+    const bool directImport = sourceTexture && !sourceTexture->isNull()
+        && sourceTexture->target() == GL_TEXTURE_2D && !sourceTexture->size().isEmpty();
+    m_lastImportDirect = directImport;
 
-        // 解码四边形向外对齐到复制区域，避免分数缩放下出现未复制或未解码的接缝。
-        if (!m_current->bgFbo->blitFromRenderTarget(renderTarget, viewport, srcLogical, dstDevice)) {
-            // 复制失败时跳过本帧，避免使用未更新的背景覆盖输出。
-            static bool warned = false;
-            if (!warned) {
-                warned = true;
-                GPU_ERROR() << "code=desktop_import_failed"
-                            << "无法取得桌面像素（渲染目标既不能 blit "
-                              "也没有可采样纹理），插件不会绘制";
-            }
-            // 返回前闭合已开始的查询，保证下一帧可以重新提交计时。
+    if (!directImport && !m_current->bgTexture) {
+        m_current->bgTexture = GLTexture::allocate(GL_RGBA16F, m_current->devicePx, 1);
+        if (!m_current->bgTexture || m_current->bgTexture->isNull()) {
+            GPU_ERROR() << "code=background_texture_alloc_failed" << m_current->devicePx;
             finishGpuTimingFrame(false);
             restoreBlendState();
-            glViewport(m_savedViewport[0], m_savedViewport[1],
-                       m_savedViewport[2], m_savedViewport[3]);
             return false;
         }
-        importedRects.append(srcLogical);
+        m_current->bgTexture->setFilter(GL_LINEAR);
+        m_current->bgTexture->setWrapMode(GL_CLAMP_TO_EDGE);
+        m_current->bgFbo = std::make_unique<GLFramebuffer>(m_current->bgTexture.get());
+        if (!m_current->bgFbo->valid()) {
+            GPU_ERROR() << "code=background_fbo_failed";
+            finishGpuTimingFrame(false);
+            restoreBlendState();
+            return false;
+        }
     }
-    importRegion = Region::fromUnsortedRects(importedRects);
+
+    if (!directImport) {
+        // 无可采样纹理时保留 framebuffer blit fallback。复制必须发生在绑定私有 HDR
+        // 帧缓冲之前，避免从错误的 framebuffer 读取。
+        QList<Rect> importedRects;
+        importedRects.reserve(importRegion.rects().size());
+        for (const Rect &logicalRect : importRegion.rects()) {
+            const QRect aligned = QRect(logicalRect.x(), logicalRect.y(),
+                                        logicalRect.width(), logicalRect.height())
+                                      .intersected(outRect.toAlignedRect());
+            if (aligned.isEmpty()) {
+                continue;
+            }
+            const Rect srcLogical(aligned.x(), aligned.y(), aligned.width(), aligned.height());
+            const Rect scaledSource = srcLogical.scaled(viewport.scale()).rounded();
+            const Rect dstDevice = scaledSource.translated(-viewport.scaledRenderRect().topLeft());
+            if (!m_current->bgFbo->blitFromRenderTarget(renderTarget, viewport,
+                                                        srcLogical, dstDevice)) {
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    GPU_ERROR() << "code=desktop_import_failed"
+                                << "无法取得桌面像素，插件不会绘制";
+                }
+                finishGpuTimingFrame(false);
+                restoreBlendState();
+                glViewport(m_savedViewport[0], m_savedViewport[1],
+                           m_savedViewport[2], m_savedViewport[3]);
+                return false;
+            }
+            importedRects.append(srcLogical);
+        }
+        importRegion = Region::fromUnsortedRects(importedRects);
+    }
 
     // 绑定输出局部 HDR 帧缓冲。
     GLFramebuffer::pushFramebuffer(m_current->hdrFbo.get());
@@ -881,7 +886,8 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         setTransferFunctionUniforms(bg, renderTarget);
 
         glActiveTexture(GL_TEXTURE0);
-        m_current->bgTexture->bind();
+        GLTexture *backgroundSource = directImport ? sourceTexture : m_current->bgTexture.get();
+        backgroundSource->bind();
         bg->setUniform("u_texture", 0);
 
         // 背景是本帧对该区域的首次写入，使用覆盖写。
@@ -893,24 +899,42 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         //
         // 投影矩阵的 y 轴向下，而 OpenGL 纹理原点位于左下，因此输出顶边对应 v=1。
         // 背景导入和最终合成必须使用相同映射。
-        std::vector<ParticleVertex> quads;
+        std::vector<ParticleVertex> &quads = m_regionQuads;
+        quads.clear();
         quads.reserve(std::size_t(importRegion.rects().size()) * 6);
+        const QSize sourceSize = backgroundSource->size();
+        const QMatrix4x4 textureMatrix = backgroundSource->matrix(NormalizedCoordinates);
+        const auto directUv = [&](const QPointF &logical) {
+            const QPointF p = viewport.mapToRenderTargetTexture(logical);
+            const QVector4D uv = textureMatrix
+                * QVector4D(float(p.x() / sourceSize.width()),
+                            float(p.y() / sourceSize.height()), 0.0f, 1.0f);
+            return QPointF(uv.x(), uv.y());
+        };
         for (const Rect &rect : importRegion.rects()) {
             const float l = static_cast<float>(rect.left() - outRect.left());
             const float r = static_cast<float>(rect.right() - outRect.left());
             const float t = static_cast<float>(rect.top() - outRect.top());
             const float b = static_cast<float>(rect.bottom() - outRect.top());
-            const float uL = static_cast<float>(l / outRect.width());
-            const float uR = static_cast<float>(r / outRect.width());
-            const float vT = static_cast<float>(1.0 - t / outRect.height());
-            const float vB = static_cast<float>(1.0 - b / outRect.height());
+            const QPointF uvLT = directImport
+                ? directUv(QPointF(rect.left(), rect.top()))
+                : QPointF(l / outRect.width(), 1.0 - t / outRect.height());
+            const QPointF uvRT = directImport
+                ? directUv(QPointF(rect.right(), rect.top()))
+                : QPointF(r / outRect.width(), 1.0 - t / outRect.height());
+            const QPointF uvLB = directImport
+                ? directUv(QPointF(rect.left(), rect.bottom()))
+                : QPointF(l / outRect.width(), 1.0 - b / outRect.height());
+            const QPointF uvRB = directImport
+                ? directUv(QPointF(rect.right(), rect.bottom()))
+                : QPointF(r / outRect.width(), 1.0 - b / outRect.height());
             quads.insert(quads.end(), {
-                {l, b, uL, vB, 1, 1, 1, 1},
-                {r, b, uR, vB, 1, 1, 1, 1},
-                {l, t, uL, vT, 1, 1, 1, 1},
-                {r, b, uR, vB, 1, 1, 1, 1},
-                {r, t, uR, vT, 1, 1, 1, 1},
-                {l, t, uL, vT, 1, 1, 1, 1},
+                {l, b, float(uvLB.x()), float(uvLB.y()), 1, 1, 1, 1},
+                {r, b, float(uvRB.x()), float(uvRB.y()), 1, 1, 1, 1},
+                {l, t, float(uvLT.x()), float(uvLT.y()), 1, 1, 1, 1},
+                {r, b, float(uvRB.x()), float(uvRB.y()), 1, 1, 1, 1},
+                {r, t, float(uvRT.x()), float(uvRT.y()), 1, 1, 1, 1},
+                {l, t, float(uvLT.x()), float(uvLT.y()), 1, 1, 1, 1},
             });
         }
         drawVertices(m_shaderBackground, quads);
@@ -1238,14 +1262,17 @@ bool GPURenderer::renderBloom(const Region &globalChangedRegion)
         }
         GLFramebuffer::pushFramebuffer(const_cast<GLFramebuffer *>(dstFbo));
         glViewport(0, 0, dstSize.width(), dstSize.height());
-        drawVertices(set, textureRegionQuads(dstRegion, dstSize));
+        textureRegionQuads(dstRegion, dstSize, m_regionQuads);
+        drawVertices(set, m_regionQuads);
         GLFramebuffer::popFramebuffer();
     };
 
     // 预筛选和降采样的四点核向外扩展一个源纹理像素。上采样同时依赖低分辨率
     // 四点核和本级同位置像素，因此使用两条传播区域的并集。
-    std::vector<Region> downRegions(levels.size());
-    std::vector<Region> upRegions(levels.size());
+    m_current->downRegions.resize(levels.size());
+    m_current->upRegions.resize(levels.size());
+    std::vector<Region> &downRegions = m_current->downRegions;
+    std::vector<Region> &upRegions = m_current->upRegions;
     Region changedInHdr = mapGlobalRegionToTexture(globalChangedRegion,
                                                     m_current->renderRect,
                                                     m_current->devicePx, 0);
@@ -1446,7 +1473,8 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     const float scale = static_cast<float>(viewport.scale());
 
     // 投影坐标 y 轴向下，而帧缓冲纹理坐标 y 轴向上，因此输出顶边对应 v=1。
-    std::vector<ParticleVertex> quads;
+    std::vector<ParticleVertex> &quads = m_regionQuads;
+    quads.clear();
     quads.reserve(std::size_t(compositeRegion.rects().size()) * 6);
     for (const Rect &area : compositeRegion.rects()) {
         const float l = static_cast<float>(area.left()) * scale;
