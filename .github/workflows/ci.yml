@@ -13,7 +13,7 @@ jobs:
         run: >-
           pacman -Syu --noconfirm --needed
           base-devel cmake extra-cmake-modules git kwin libepoxy ninja
-          qt6-base qt6-declarative
+          qt6-base qt6-declarative ripgrep
 
       - uses: actions/checkout@v4
 

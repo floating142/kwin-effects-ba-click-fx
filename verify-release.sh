@@ -24,6 +24,13 @@ required_files=(
 )
 
 failed=0
+
+if ! command -v rg >/dev/null 2>&1; then
+  echo "缺少命令: rg (ripgrep)" >&2
+  echo "Missing command: rg (ripgrep)" >&2
+  exit 1
+fi
+
 for path in "${required_files[@]}"; do
   if [[ ! -s "${path}" ]]; then
     echo "缺少或为空: ${path}" >&2
@@ -62,8 +69,13 @@ if ! rg -q 'transfer\.glsl' shader/*.frag; then
   echo "没有着色器引用 transfer.glsl" >&2
   failed=1
 fi
-if ! git --no-pager diff --check; then
-  failed=1
+if git -C "${src_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if ! git -C "${src_dir}" --no-pager diff --check; then
+    failed=1
+  fi
+else
+  echo "==> 跳过 Git 差异检查（当前目录不是 Git 工作树）"
+  echo "==> Skip Git diff check (not a Git worktree)"
 fi
 
 if [[ "${failed}" -ne 0 ]]; then
