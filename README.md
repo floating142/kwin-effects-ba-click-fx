@@ -46,7 +46,7 @@ sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin libepoxy qt6-b
 Fedora：
 
 ```bash
-sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
+sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
 如需运行 `verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。

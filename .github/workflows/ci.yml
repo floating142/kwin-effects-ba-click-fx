@@ -29,7 +29,7 @@ jobs:
           dnf install -y
           appstream cmake extra-cmake-modules gcc-c++ gettext git kwin-devel
           kf6-kcmutils-devel kf6-ki18n-devel
-          libepoxy-devel ninja-build qt6-qtbase-devel qt6-qtdeclarative-devel
+          libdrm-devel libepoxy-devel ninja-build qt6-qtbase-devel qt6-qtdeclarative-devel
           qt6-qttools-devel
           ripgrep vulkan-headers
 
