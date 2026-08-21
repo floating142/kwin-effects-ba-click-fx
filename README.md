@@ -40,14 +40,16 @@ KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。升级 KWin 后必
 Arch Linux：
 
 ```bash
-sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin
+sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin libepoxy qt6-base qt6-declarative vulkan-headers
 ```
 
 Fedora：
 
 ```bash
-sudo dnf install -y cmake extra-cmake-modules kwin-devel
+sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kwin-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel vulkan-headers
 ```
+
+如需运行 `verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
 
 在项目目录运行：
 
@@ -124,7 +126,7 @@ kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key DebugDamage true
 qdbus-qt6 org.kde.KWin /Effects reconfigureEffect kwin4_effect_ba_click_fx
 ```
 
-青色表示插件申请的逻辑重绘区域，洋红色表示 KWin 实际交给 effect 的输出渲染区域。性能测试时应关闭 `DebugDamage`。
+青色边框表示插件申请的逻辑重绘区域。性能测试时应关闭 `DebugDamage`。
 
 ## 热重载限制
 

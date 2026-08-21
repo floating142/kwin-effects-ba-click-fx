@@ -45,6 +45,12 @@ msgstr "拖动时按累计路程连发小三角"
 msgid "Log level:"
 msgstr "日志级别："
 
+msgid "Show debug options"
+msgstr "显示调试选项"
+
+msgid "Show logging, damage and diagnostics controls"
+msgstr "显示日志、重绘区域和诊断相关控件"
+
 msgid "Off"
 msgstr "关闭"
 

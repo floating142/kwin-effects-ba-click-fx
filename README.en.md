@@ -27,11 +27,22 @@ KWin native effects are ABI-bound to the exact KWin version. Rebuild this effect
 
 ## Install
 
-On Arch Linux, install the usual build dependencies first:
+Install the build dependencies first.
+
+Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin
+sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin libepoxy qt6-base qt6-declarative vulkan-headers
 ```
+
+Fedora:
+
+```bash
+sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kwin-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel vulkan-headers
+```
+
+Running `verify-release.sh` additionally requires `appstream` and `ripgrep`; CI also uses
+`ninja-build`.
 
 Run the installer as your normal user:
 
@@ -81,6 +92,18 @@ The configuration page can copy diagnostics, generate a report and open the diag
 qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx status
 qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx diagnostics
 ```
+
+Set `LogLevel` to `3` for frame statistics or `4` for verbose diagnostics. Reports are stored in
+`~/.cache/ba-click-fx/diagnostics/`. The `DebugDamage` option draws the regions requested by the
+effect and should be disabled when collecting performance numbers.
+
+## Rendering architecture
+
+Each frame imports the changed desktop pixels into a linear RGBA16F scene, draws the trail and
+particle layers in Unity render-queue order, runs the PPv2 MXFinalBloom pyramid over the bright
+source region, and composites the scene back through the output color transform. Per-output
+targets are reused; damage regions reduce imported and processed pixels without changing shader
+parameters or particle geometry.
 
 ## License
 

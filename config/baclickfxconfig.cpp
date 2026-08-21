@@ -22,6 +22,7 @@
 #include <QFile>
 #include <QDateTime>
 #include <QProcess>
+#include <QTimer>
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -43,6 +44,18 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     KLocalizedString::setApplicationDomain(QByteArrayLiteral("kwin_ba_click_fx_config"));
     // setupUi() 负责为 KCModule 页面安装布局。
     m_ui.setupUi(widget());
+
+    const auto showDebugOptions = [this](bool visible) {
+        m_ui.logLevelLabel->setVisible(visible);
+        m_ui.logLevelComboBox->setVisible(visible);
+        m_ui.debugDamageCheckBox->setVisible(visible);
+        m_ui.copyDiagnosticsButton->setVisible(visible);
+        m_ui.generateDiagnosticsButton->setVisible(visible);
+        m_ui.openDiagnosticsDirButton->setVisible(visible);
+    };
+    connect(m_ui.showDebugOptionsCheckBox, &QCheckBox::toggled,
+            this, showDebugOptions);
+    showDebugOptions(false);
 
     // 运行时范围来自共享默认值；.ui 中的范围仅用于 Designer 预览。
     m_ui.timeScaleSlider->setRange(int(def::kTimeScaleMin * kSliderScale),
@@ -86,8 +99,14 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
             if (!reply.isError() && !reply.value().isEmpty()) {
                 QApplication::clipboard()->setText(reply.value());
                 m_ui.copyDiagnosticsButton->setText(i18n("Copied"));
+                QTimer::singleShot(1500, this, [this]() {
+                    m_ui.copyDiagnosticsButton->setText(i18n("Copy diagnostics"));
+                });
             } else {
                 m_ui.copyDiagnosticsButton->setText(i18n("Failed"));
+                QTimer::singleShot(1500, this, [this]() {
+                    m_ui.copyDiagnosticsButton->setText(i18n("Copy diagnostics"));
+                });
             }
             call->deleteLater();
         });
@@ -122,19 +141,40 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
                     report.write("[diagnostics]\n");
                     report.write(reply.value().toUtf8());
                     report.write("\n\n[recent_logs]\n");
-                    QProcess journal;
-                    journal.start(QStringLiteral("journalctl"),
-                                  {QStringLiteral("--user"), QStringLiteral("--since=-2min"),
-                                   QStringLiteral("-n"), QStringLiteral("200"),
-                                   QStringLiteral("-o"), QStringLiteral("cat"),
-                                   QStringLiteral("QT_CATEGORY=kwin_effect_ba_click_fx")});
-                    if (journal.waitForFinished(3000)) {
-                        report.write(journal.readAllStandardOutput());
-                    }
-                    m_ui.generateDiagnosticsButton->setText(i18n("Generated"));
+                    report.close();
+                    auto *journal = new QProcess(this);
+                    const QString reportPath = path;
+                    connect(journal, &QProcess::finished, this,
+                            [this, journal, reportPath](int, QProcess::ExitStatus) {
+                        QFile reportFile(reportPath);
+                        if (reportFile.open(QIODevice::Append | QIODevice::Text)) {
+                            reportFile.write(journal->readAllStandardOutput());
+                            reportFile.close();
+                            m_ui.generateDiagnosticsButton->setText(i18n("Generated"));
+                        } else {
+                            m_ui.generateDiagnosticsButton->setText(i18n("Failed"));
+                        }
+                        QTimer::singleShot(1500, this, [this]() {
+                            m_ui.generateDiagnosticsButton->setText(i18n("Generate report"));
+                        });
+                        journal->deleteLater();
+                    });
+                    journal->start(QStringLiteral("journalctl"),
+                                   {QStringLiteral("--user"), QStringLiteral("--since=-2min"),
+                                    QStringLiteral("-n"), QStringLiteral("200"),
+                                    QStringLiteral("-o"), QStringLiteral("cat"),
+                                    QStringLiteral("QT_CATEGORY=kwin_effect_ba_click_fx")});
+                } else {
+                    m_ui.generateDiagnosticsButton->setText(i18n("Failed"));
+                    QTimer::singleShot(1500, this, [this]() {
+                        m_ui.generateDiagnosticsButton->setText(i18n("Generate report"));
+                    });
                 }
             } else {
                 m_ui.generateDiagnosticsButton->setText(i18n("Failed"));
+                QTimer::singleShot(1500, this, [this]() {
+                    m_ui.generateDiagnosticsButton->setText(i18n("Generate report"));
+                });
             }
             call->deleteLater();
         });

@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  build-and-test:
+  arch:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
@@ -14,6 +14,22 @@ jobs:
           pacman -Syu --noconfirm --needed
           appstream base-devel cmake extra-cmake-modules git kwin libepoxy ninja
           qt6-base qt6-declarative ripgrep vulkan-headers
+
+      - uses: actions/checkout@v4
+
+      - name: Verify release
+        run: JOBS=2 ./verify-release.sh build/ci
+
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: >-
+          dnf install -y
+          appstream cmake extra-cmake-modules gcc-c++ gettext git kwin-devel
+          libepoxy-devel ninja-build qt6-qtbase-devel qt6-qtdeclarative-devel
+          ripgrep vulkan-headers
 
       - uses: actions/checkout@v4
 

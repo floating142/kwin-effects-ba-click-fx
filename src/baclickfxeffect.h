@@ -196,6 +196,7 @@ private:
     // 性能统计状态，仅在帧统计级别及以上更新。记录 CPU 分段、异步 GPU 计时、呈现
     // 间隔，以及插件申请区域与 KWin 实际重绘区域的差异。
     void logFrameStats(const RenderViewport &viewport, const Region &deviceRegion, double cpuMs);
+    void resetFrameStats();
 
     struct OutputFrameStats
     {

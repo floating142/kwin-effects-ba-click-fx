@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-project(kwin-effects-ba-click-fx VERSION 1.0.0 LANGUAGES CXX)
+project(kwin-effects-ba-click-fx VERSION 1.0.1 LANGUAGES CXX)
 
 # 根据源文件内容生成可复现的构建标识。install-local.sh 可通过 /Effects.debug
 # 查询该值，以判断 KWin 当前加载的插件是否与本次构建一致。相同源码始终生成相同
@@ -13,6 +13,10 @@ file(GLOB_RECURSE BA_CLICK_FX_BUILD_ID_FILES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/shader/*.vert"
     "${CMAKE_SOURCE_DIR}/shader/*.frag"
     "${CMAKE_SOURCE_DIR}/shader/*.glsl"
+    "${CMAKE_SOURCE_DIR}/assets/*"
+    "${CMAKE_SOURCE_DIR}/config/*.cpp"
+    "${CMAKE_SOURCE_DIR}/config/*.h"
+    "${CMAKE_SOURCE_DIR}/config/*.ui"
 )
 set(BA_CLICK_FX_BUILD_ID_MATERIAL "")
 foreach(path IN LISTS BA_CLICK_FX_BUILD_ID_FILES)

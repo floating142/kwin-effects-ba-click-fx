@@ -17,12 +17,6 @@ double resolve(double value, double fallback)
     return std::isnan(value) ? fallback : value;
 }
 
-// JavaScript Math.round 采用 floor(x + 0.5)，其负半数行为与 std::round 不同。
-double jsRound(double v)
-{
-    return std::floor(v + 0.5);
-}
-
 // widthCurve 的默认值为恒定 1。
 constexpr ScalarStop kDefaultWidthCurve[] = {
     {0.0, 1.0},

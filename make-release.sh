@@ -19,15 +19,19 @@ checksums="${out_dir}/${name}-SHA256SUMS.txt"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "${work_dir}"' EXIT
 
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "发布源码包必须从 Git 工作树生成 / Release archives must be created from a Git worktree" >&2
+  exit 1
+fi
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "请先提交当前修改再生成发布包 / Commit the current changes before creating a release archive" >&2
+  exit 1
+fi
+
 "${root_dir}/verify-release.sh"
 
-mkdir -p "${out_dir}" "${work_dir}/${name}"
-tar -cf - \
-  --exclude='./.git' \
-  --exclude='./build' \
-  --exclude='./dist' \
-  --exclude='./.cache' \
-  . | tar -xf - -C "${work_dir}/${name}"
+mkdir -p "${out_dir}"
+git archive --format=tar --prefix="${name}/" HEAD | tar -xf - -C "${work_dir}"
 
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || date +%s)}"
 tar --sort=name \

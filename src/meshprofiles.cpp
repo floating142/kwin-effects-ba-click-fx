@@ -14,12 +14,6 @@ namespace baclickfx {
 
 namespace {
 
-// JavaScript Math.round 采用 floor(x + 0.5)。
-double jsRound(double v)
-{
-    return std::floor(v + 0.5);
-}
-
 // 去除字符串两端空白，包括 CRLF 中的回车字符。
 std::string trimmed(const std::string &s)
 {

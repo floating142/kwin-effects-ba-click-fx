@@ -7,30 +7,6 @@
 
 namespace baclickfx {
 
-double clamp(double v, double min, double max)
-{
-    return std::min(max, std::max(min, v));
-}
-
-double lerp(double a, double b, double t)
-{
-    return a + (b - a) * t;
-}
-
-double easeOutQuad(double t)
-{
-    return 1 - (1 - t) * (1 - t);
-}
-
-double normalizeAngle(double a)
-{
-    const double twoPi = M_PI * 2;
-    double out = std::fmod(a, twoPi);
-    if (out < 0)
-        out += twoPi;
-    return out;
-}
-
 namespace {
 // 采样相邻标量关键帧；有效切线使用 Hermite 插值，否则回退到线性插值。
 double evalScalarSegment(const ScalarStop &a, const ScalarStop &b, double t)

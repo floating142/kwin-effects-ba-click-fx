@@ -14,18 +14,13 @@ namespace KWin
 
 using baclickfx::Rgb;
 using baclickfx::clamp;
+using baclickfx::jsRound;
 
 namespace
 {
 
 // 实现级容量上限，用于约束内存和绘制开销。1000 点可覆盖 0.3 秒内约 1800px 路程。
 constexpr std::size_t kMaxPoints = 1000;
-
-// JavaScript Math.round 采用 floor(x + 0.5)。
-double jsRound(double v)
-{
-    return std::floor(v + 0.5);
-}
 
 // 按 TrailRenderer.textureMode 和 textureScale 计算纹理 U 坐标。
 double sampleTrailTextureU(const baclickfx::Subsystem &trail, double distancePx,
@@ -131,7 +126,7 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
                        const QPointF &origin, std::vector<StrokeData> &out)
 {
     std::size_t outputCount = 0;
-    const std::vector<TrailPoint> &pts = stream.points();
+    const std::deque<TrailPoint> &pts = stream.points();
     if (pts.size() < 2) {
         out.clear();
         return;
@@ -202,7 +197,7 @@ void TrailStream::pushPoint(const QPointF &p, bool penUp)
 {
     m_points.push_back(TrailPoint{p, 0.0, penUp});
     if (m_points.size() > kMaxPoints) {
-        m_points.erase(m_points.begin(), m_points.begin() + (m_points.size() - kMaxPoints));
+        m_points.pop_front();
     }
 }
 

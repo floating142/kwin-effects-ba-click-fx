@@ -99,16 +99,29 @@ using ScalarCurve = StopSpan<ScalarStop>;
 using ColorCurve = StopSpan<ColorStop>;
 
 /// 将数值限制在闭区间 `[min, max]`。
-double clamp(double v, double min, double max);
+inline double clamp(double v, double min, double max)
+{
+    return std::min(max, std::max(min, v));
+}
 
 /// 在两个标量之间执行线性插值。
-double lerp(double a, double b, double t);
+inline double lerp(double a, double b, double t) { return a + (b - a) * t; }
 
 /// 计算归一化时间的二次缓出值。
-double easeOutQuad(double t);
+inline double easeOutQuad(double t) { return 1 - (1 - t) * (1 - t); }
 
 /// 将弧度角归一化到 `[0, 2π)`。
-double normalizeAngle(double a);
+inline double normalizeAngle(double a)
+{
+    const double twoPi = 2.0 * M_PI;
+    double out = std::fmod(a, twoPi);
+    if (out < 0)
+        out += twoPi;
+    return out;
+}
+
+/// JavaScript Math.round semantics used by the Unity data conversion.
+inline double jsRound(double v) { return std::floor(v + 0.5); }
 
 /**
  * 采样标量曲线。

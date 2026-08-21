@@ -32,6 +32,8 @@ namespace KWin
 namespace
 {
 
+constexpr auto kAutoTrailIdleTimeout = std::chrono::milliseconds(50);
+
 constexpr int kDamageTilePx = 64;
 
 void unitePointBounds(QRectF &bounds, double x, double y)
@@ -129,14 +131,15 @@ Rect damageTileRect(const QRectF &bounds)
 void appendDamageRect(QList<Rect> &rects, const QRectF &bounds)
 {
     const Rect tiled = damageTileRect(bounds);
-    if (!tiled.isEmpty()) {
+    // 相邻线段常量化到同一 tile；重复矩形对 Region 并集没有影响，只增加合并成本。
+    if (!tiled.isEmpty() && (rects.isEmpty() || rects.back() != tiled)) {
         rects.append(tiled);
     }
 }
 
 void appendTrailDamage(QList<Rect> &rects, const TrailStream &stream, double pad)
 {
-    const std::vector<TrailPoint> &points = stream.points();
+    const std::deque<TrailPoint> &points = stream.points();
     if (points.size() < 2) {
         return;
     }
@@ -252,25 +255,9 @@ void BaClickFxEffect::loadConfig()
         && group.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault);
 
     // GPU timer 只在帧统计及以上级别启用。
+    m_gpu.setLogLevel(m_logLevel);
     m_gpu.setProfiling(logsFrames());
-    m_statFrames = 0;
-    m_statCpuMsSum = m_statCpuMsMax = 0.0;
-    m_statPrePaintCpuMsSum = 0.0;
-    m_statSetupCpuMsSum = 0.0;
-    m_statTrailCpuMsSum = 0.0;
-    m_statParticleCpuMsSum = 0.0;
-    m_statFinishCpuMsSum = 0.0;
-    m_inputCpuMsSinceLog = 0.0;
-    m_inputEvents = m_inputAccepted = m_inputMerged = m_inputDiscarded = m_inputCrossScreen = 0;
-    m_mouseChangedEvents = m_mouseChangedMotion = 0;
-    m_pointerMotionEvents = m_fallbackSamples = 0;
-    m_skipNoActivity = m_skipNoDamage = m_skipGpu = m_skipTarget = m_skipImport = 0;
-    m_statGpuMsSum = m_statGpuMsMax = 0.0;
-    m_statGpuImportMsSum = 0.0;
-    m_statGpuParticleMsSum = 0.0;
-    m_statGpuBloomMsSum = 0.0;
-    m_statGpuCompositeMsSum = 0.0;
-    m_statGpuSamples = 0;
+    resetFrameStats();
     m_lastGpuSampleSerial = m_gpu.gpuSampleSerial();
     m_statFrameMsSum = m_statFrameMsMax = 0.0;
     m_statDevicePxSum = m_statRequestPxSum = m_statBloomSourcePxSum = 0.0;
@@ -524,16 +511,18 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
         return;
     }
     ++m_inputAccepted;
-    auto outputAt = [this](const QPointF &point) {
-        for (const LogicalOutput *out : effects->screens()) {
-            if (out && out->geometry().contains(point.toPoint())) {
-                return out;
+    if (logsFrames()) {
+        auto outputAt = [this](const QPointF &point) {
+            for (const LogicalOutput *out : effects->screens()) {
+                if (out && out->geometry().contains(point.toPoint())) {
+                    return out;
+                }
             }
+            return static_cast<const LogicalOutput *>(nullptr);
+        };
+        if (outputAt(m_lastDrag) != outputAt(pos)) {
+            ++m_inputCrossScreen;
         }
-        return static_cast<const LogicalOutput *>(nullptr);
-    };
-    if (outputAt(m_lastDrag) != outputAt(pos)) {
-        ++m_inputCrossScreen;
     }
     TrailSession *session = !m_trails.empty() && m_trails.back().active
         ? &m_trails.back()
@@ -632,7 +621,11 @@ void BaClickFxEffect::endDrag()
 Region BaClickFxEffect::contentRegion() const
 {
     QList<Rect> rects;
-    rects.reserve(qsizetype(m_instances.size() + m_bursts.size() + 64));
+    qsizetype trailPointCount = 0;
+    for (const TrailSession &session : m_trails) {
+        trailPointCount += qsizetype(session.stream.points().size());
+    }
+    rects.reserve(qsizetype(m_instances.size() + m_bursts.size()) + trailPointCount + 64);
 
     for (const ClickInstance &inst : m_instances) {
         appendDamageRect(rects, clickBounds(inst, m_meshes.cylinder002));
@@ -704,6 +697,26 @@ Region BaClickFxEffect::dirtyRegion(const Region &content) const
     return dirty;
 }
 
+void BaClickFxEffect::resetFrameStats()
+{
+    m_statFrames = 0;
+    m_statCpuMsSum = m_statCpuMsMax = 0.0;
+    m_statPrePaintCpuMsSum = m_statSetupCpuMsSum = 0.0;
+    m_statTrailCpuMsSum = m_statParticleCpuMsSum = m_statFinishCpuMsSum = 0.0;
+    m_inputCpuMsSinceLog = 0.0;
+    m_inputEvents = m_inputAccepted = m_inputMerged = m_inputDiscarded = m_inputCrossScreen = 0;
+    m_mouseChangedEvents = m_mouseChangedMotion = m_pointerMotionEvents = m_fallbackSamples = 0;
+    m_skipNoActivity = m_skipNoDamage = m_skipGpu = m_skipTarget = m_skipImport = 0;
+    m_statGpuMsSum = m_statGpuMsMax = 0.0;
+    m_statGpuImportMsSum = m_statGpuParticleMsSum = 0.0;
+    m_statGpuBloomMsSum = m_statGpuCompositeMsSum = 0.0;
+    m_statGpuSamples = 0;
+    m_statFrameMsSum = m_statFrameMsMax = 0.0;
+    m_statDevicePxSum = m_statRequestPxSum = m_statBloomSourcePxSum = 0.0;
+    m_statDeviceRectsSum = m_statRequestRectsSum = m_statBloomSourceRectsSum = 0.0;
+    m_outputFrameStats.clear();
+}
+
 void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
 {
     const auto cpuStart = logsFrames() ? std::chrono::steady_clock::now()
@@ -726,7 +739,7 @@ void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
     // Unity 的 0.3 秒寿命自然淡出，避免空闲时永久维持重绘循环。
     if (m_autoTrailSession
         && std::chrono::steady_clock::now() - m_lastAutoTrailMotion
-            > std::chrono::milliseconds(50)) {
+            > kAutoTrailIdleTimeout) {
         endDrag();
     }
 
@@ -936,28 +949,7 @@ void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,
         qCInfo(KWIN_BA_CLICK_FX).noquote() << baclickfx::formatFrameStats(summary);
     }
 
-    m_statFrames = 0;
-    m_statCpuMsSum = m_statCpuMsMax = 0.0;
-    m_statPrePaintCpuMsSum = 0.0;
-    m_statSetupCpuMsSum = 0.0;
-    m_statTrailCpuMsSum = 0.0;
-    m_statParticleCpuMsSum = 0.0;
-    m_statFinishCpuMsSum = 0.0;
-    m_inputCpuMsSinceLog = 0.0;
-    m_inputEvents = m_inputAccepted = m_inputMerged = m_inputDiscarded = m_inputCrossScreen = 0;
-    m_mouseChangedEvents = m_mouseChangedMotion = 0;
-    m_pointerMotionEvents = m_fallbackSamples = 0;
-    m_skipNoActivity = m_skipNoDamage = m_skipGpu = m_skipTarget = m_skipImport = 0;
-    m_statGpuMsSum = m_statGpuMsMax = 0.0;
-    m_statGpuImportMsSum = 0.0;
-    m_statGpuParticleMsSum = 0.0;
-    m_statGpuBloomMsSum = 0.0;
-    m_statGpuCompositeMsSum = 0.0;
-    m_statGpuSamples = 0;
-    m_statFrameMsSum = m_statFrameMsMax = 0.0;
-    m_statDevicePxSum = m_statRequestPxSum = m_statBloomSourcePxSum = 0.0;
-    m_statDeviceRectsSum = m_statRequestRectsSum = m_statBloomSourceRectsSum = 0.0;
-    m_outputFrameStats.clear();
+    resetFrameStats();
 }
 
 void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
@@ -989,6 +981,9 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
 
     if (!logsFrames()) {
         renderGpu(renderTarget, viewport);
+        if (m_debugDamage) {
+            drawDebugDamage(renderTarget, viewport);
+        }
         return;
     }
 

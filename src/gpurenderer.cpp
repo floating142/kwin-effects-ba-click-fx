@@ -7,6 +7,7 @@
 #include "meshprofiles.h"
 #include "subsystems.h"
 #include "trailstream.h"
+#include "bloomutils.h"
 
 #include <core/rendertarget.h>
 #include <core/renderviewport.h>
@@ -29,7 +30,9 @@ Q_LOGGING_CATEGORY(KWIN_BA_CLICK_FX_RENDERER, "kwin_effect_ba_click_fx")
 namespace
 {
 
-#define GPU_ERROR() qCWarning(KWIN_BA_CLICK_FX_RENDERER) \
+bool s_logErrors = false;
+
+#define GPU_ERROR() if (!s_logErrors) {} else qCWarning(KWIN_BA_CLICK_FX_RENDERER) \
     << "event=error component=gpu_renderer"
 
 // 着色器源码安装在 shader/ 目录，并在初始化阶段读取和编译。
@@ -50,45 +53,8 @@ constexpr float kBloomIntensity = 0.12503f;
 constexpr float kBloomClampMax = 3.9385e10f;
 // Color 为白色，但仍显式参与辉光染色公式。
 constexpr float kBloomColor[3] = {1.0f, 1.0f, 1.0f};
-// Diffusion 为 7，PPv2 使用该值计算金字塔级数与上采样半径：
-//     s = max(floor(w/2), floor(h/2))          // 金字塔第 0 级（半分辨率）的长边
-//     logs = log2(s) + min(diffusion, 10) - 10
-//     iterations  = clamp(floor(logs), 1, 16)
-//     sampleScale = 0.5 + logs - floor(logs)
-constexpr int kBloomDiffusion = 7;
 // 金字塔最小边长取 2；宽度为 1 时四点采样会退化为同一纹理像素，不再增加信息。
 constexpr int kBloomMinSize = 2;
-// PPv2 的 k_MaxPyramidSize。
-constexpr int kBloomMaxLevels = 16;
-
-// 由 Diffusion 计算出的金字塔级数和上采样尺度。
-struct BloomPyramidParams
-{
-    int iterations = 1;
-    float sampleScale = 1.0f;
-};
-
-// PPv2 在 AnamorphicRatio 为 0 时使用 floor(w/2) 和 floor(h/2) 作为第 0 级
-// 尺寸。资源分配和参数计算必须共用该取整结果。
-QSize bloomBaseSize(const QSize &devicePixels)
-{
-    return QSize(devicePixels.width() / 2, devicePixels.height() / 2);
-}
-
-// 按 PPv2 公式从第 0 级尺寸和 Diffusion 计算级数与上采样尺度。baseSize 必须来自
-// 单块输出，不能使用虚拟桌面并集，否则会错误增加级数和传播半径。
-BloomPyramidParams bloomPyramidParams(const QSize &baseSize)
-{
-    const float longSide = float(std::max(baseSize.width(), baseSize.height()));
-    const float logs = std::log2(std::max(longSide, 1.0f))
-        + float(std::min(kBloomDiffusion, 10)) - 10.0f;
-    const float logsFloor = std::floor(logs);
-
-    BloomPyramidParams p;
-    p.iterations = std::clamp(int(logsFloor), 1, kBloomMaxLevels);
-    p.sampleScale = 0.5f + logs - logsFloor;
-    return p;
-}
 
 // 效果层 Region 使用全局逻辑坐标，离屏纹理使用左上角为原点的纹理像素坐标。
 // 区域映射统一向外取整，避免裁掉辉光采样核的有效贡献。
@@ -317,7 +283,9 @@ bool GPURenderer::initialize()
         return false;
     }
 
-    qCInfo(KWIN_BA_CLICK_FX_RENDERER) << "event=initialized component=gpu_renderer";
+    if (m_logVerbose) {
+        qCInfo(KWIN_BA_CLICK_FX_RENDERER) << "event=initialized component=gpu_renderer";
+    }
     return true;
 }
 
@@ -440,11 +408,18 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
     }
 
     // 输出数量有限，线性查找可避免额外缓存结构。
-    for (const auto &t : m_outputs) {
+    for (auto it = m_outputs.begin(); it != m_outputs.end(); ++it) {
+        const auto &t = *it;
         if (t->renderRect == outputRect && qFuzzyCompare(t->scale, scale)
             && t->renderTargetDevicePx == renderTargetDevicePx
             && t->transformKind == transformKind) {
             m_current = t.get();
+            // 队尾为最近使用项。unique_ptr 移动不改变 OutputTargets 的对象地址。
+            if (std::next(it) != m_outputs.end()) {
+                auto hit = std::move(*it);
+                m_outputs.erase(it);
+                m_outputs.push_back(std::move(hit));
+            }
             return true;
         }
     }
@@ -452,8 +427,7 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
     // 限制逐输出缓存数量，避免分辨率或缩放反复变化时保留过多陈旧资源。
     constexpr std::size_t kMaxCachedOutputs = 4;
     if (m_outputs.size() >= kMaxCachedOutputs) {
-        m_outputs.clear();
-        m_current = nullptr;
+        m_outputs.erase(m_outputs.begin());
     }
 
     auto targets = std::make_unique<OutputTargets>();
@@ -508,8 +482,11 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
         glEnable(GL_SCISSOR_TEST);
     }
 
-    qDebug() << "GPURenderer: HDR FBO 已创建" << devicePx << "scale" << scale
-             << "bloom 级数" << targets->bloomLevels.size();
+    if (m_logVerbose) {
+        qCInfo(KWIN_BA_CLICK_FX_RENDERER)
+            << "event=targets_created size=" << devicePx << " scale=" << scale
+            << " bloom_levels=" << targets->bloomLevels.size();
+    }
 
     m_outputs.push_back(std::move(targets));
     m_current = m_outputs.back().get();
@@ -518,10 +495,7 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
 
 double GPURenderer::bloomReachPx(const QSize &devicePx, double scale)
 {
-    const BloomPyramidParams params = bloomPyramidParams(bloomBaseSize(devicePx));
-    const double reachDevice =
-        (1.0 + double(params.sampleScale)) * double(1 << params.iterations);
-    return reachDevice / std::max(scale, 0.01);
+    return baclickfx::bloomReachPx(devicePx, scale);
 }
 
 bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devicePx)
@@ -529,8 +503,8 @@ bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devic
     targets.bloomLevels.clear();
 
     // 级数和上采样尺度由第 0 级尺寸及 Diffusion 按 PPv2 公式确定。
-    QSize s = bloomBaseSize(devicePx);
-    const BloomPyramidParams params = bloomPyramidParams(s);
+    QSize s = baclickfx::bloomBaseSize(devicePx);
+    const baclickfx::BloomPyramidParams params = baclickfx::bloomPyramidParams(s);
     targets.bloomSampleScale = params.sampleScale;
 
     // 各级尺寸逐次减半；kBloomMinSize 作为极小输出的保护条件。
@@ -590,6 +564,12 @@ void GPURenderer::setProfiling(bool on)
     // 配置重载路径不保证存在当前 OpenGL 上下文，因此这里只记录清理请求。查询对象
     // 统一在下一次 beginFrame() 中释放，避免无上下文调用及复用旧采样结果。
     m_timerNeedsCleanup = true;
+}
+
+void GPURenderer::setLogLevel(baclickfx::defaults::LogLevel level)
+{
+    s_logErrors = level >= baclickfx::defaults::LogLevel::Error;
+    m_logVerbose = level >= baclickfx::defaults::LogLevel::Verbose;
 }
 
 void GPURenderer::collectGpuTimings()
@@ -957,6 +937,11 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     switchGpuTimerPhase(GpuTimerPhase::Particle);
     return true;
+}
+
+void GPURenderer::appendVertex(const ParticleVertex &vertex)
+{
+    m_vertices.push_back(vertex);
 }
 
 void GPURenderer::appendVertices(const std::vector<ParticleVertex> &vertices)
@@ -1562,24 +1547,18 @@ void GPURenderer::renderRing(double cx, double cy, const RingEmission &sub, doub
 
     // 旋转并平移到圆心；两个三角形使用索引 (0,1,2) 和 (1,3,2)。
     static constexpr int kQuadIndices[6] = {0, 1, 2, 1, 3, 2};
-    std::vector<ParticleVertex> quad;
-    quad.reserve(6);
-    {
-        for (int i = 0; i < 6; i++) {
-            const int idx = kQuadIndices[i];
-            const float lx = corners[idx][0];
-            const float ly = corners[idx][1];
-            const float rx = lx * cosR - ly * sinR;
-            const float ry = lx * sinR + ly * cosR;
-            quad.push_back({
-                static_cast<float>(cx + rx), static_cast<float>(cy + ry),
-                uvs[idx][0], uvs[idx][1],
-                r, g, b, a
-            });
-        }
+    for (int i = 0; i < 6; i++) {
+        const int idx = kQuadIndices[i];
+        const float lx = corners[idx][0];
+        const float ly = corners[idx][1];
+        const float rx = lx * cosR - ly * sinR;
+        const float ry = lx * sinR + ly * cosR;
+        appendVertex({
+            static_cast<float>(cx + rx), static_cast<float>(cy + ry),
+            uvs[idx][0], uvs[idx][1],
+            r, g, b, a
+        });
     }
-
-    appendVertices(quad);
     flushVertices(m_shaderAlphablendAdd, m_texCircle.get());
 }
 
@@ -1625,8 +1604,7 @@ void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub
 
         for (std::size_t fi = 0; fi < profile.mesh.faces.size(); fi++) {
             const baclickfx::Face &face = profile.mesh.faces[fi];
-            std::vector<ParticleVertex> tri;
-            tri.reserve(3);
+            const std::size_t vertexStart = m_vertices.size();
             bool valid = true;
             for (int corner = 0; corner < 3; corner++) {
                 const int vi = face[corner];
@@ -1642,15 +1620,15 @@ void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub
                     valid = false;
                     break;
                 }
-                tri.push_back({
+                appendVertex({
                     static_cast<float>(cx + sx * cosR - sy * sinR),
                     static_cast<float>(cy + sx * sinR + sy * cosR),
                     static_cast<float>((*uv)[0]), static_cast<float>((*uv)[1]),
                     cr, cg, cb, ca, dissolve,
                 });
             }
-            if (valid) {
-                appendVertices(tri);
+            if (!valid) {
+                m_vertices.resize(vertexStart);
             }
         }
     }
@@ -1721,13 +1699,11 @@ void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmi
         };
         static constexpr int kQuadIndices[6] = {0, 1, 2, 1, 3, 2};
 
-        std::vector<ParticleVertex> quad;
-        quad.reserve(6);
         for (int i = 0; i < 6; i++) {
             const int idx = kQuadIndices[i];
             const float lx = corners[idx][0];
             const float ly = corners[idx][1];
-            quad.push_back({
+            appendVertex({
                 static_cast<float>(x + lx * cosR - ly * sinR),
                 static_cast<float>(y + lx * sinR + ly * cosR),
                 static_cast<float>(tile.mapU(uvCorners[idx][0])),
@@ -1735,7 +1711,6 @@ void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmi
                 r, g, b, a,
             });
         }
-        appendVertices(quad);
     }
 
     // Ring3/Ring4 使用 BaTouchAdditive.shader 的 One/One 加法混合。

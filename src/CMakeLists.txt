@@ -25,6 +25,7 @@ target_sources(kwin4_effect_ba_click_fx PRIVATE
     curveutils.cpp
     diagnostics.cpp
     damageutils.cpp
+    bloomutils.cpp
     pathresampler.cpp
     subsystems.cpp
     meshprofiles.cpp

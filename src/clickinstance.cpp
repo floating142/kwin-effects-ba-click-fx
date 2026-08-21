@@ -13,15 +13,10 @@ using baclickfx::Rgb;
 using baclickfx::Rgba;
 using baclickfx::clamp;
 using baclickfx::lerp;
+using baclickfx::jsRound;
 
 namespace
 {
-
-// JavaScript Math.round 采用 floor(x + 0.5)，其负半数行为与 std::round 不同。
-double jsRound(double v)
-{
-    return std::floor(v + 0.5);
-}
 
 // 生成兼容与诊断使用的毫秒寿命，不参与动画进度计算。
 int lifetimeMsOf(double lifetimeSec, double timeScale)

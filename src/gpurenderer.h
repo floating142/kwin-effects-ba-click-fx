@@ -21,6 +21,7 @@
 #pragma once
 
 #include "clickinstance.h"
+#include "baclickfxdefaults.h"
 #include "curveutils.h"
 #include "meshprofiles.h"
 #include "subsystems.h"
@@ -120,6 +121,9 @@ public:
     /// 启用或禁用背景导入、粒子、辉光和最终合成四个阶段的异步 GPU 计时。
     void setProfiling(bool on);
 
+    /// 同步插件日志级别；错误日志使用 Error+，普通状态日志只使用 Verbose。
+    void setLogLevel(baclickfx::defaults::LogLevel level);
+
     // GPU 查询结果采用异步读取，不会阻塞合成线程。每发布一组新结果，
     // gpuSampleSerial() 增加一次；尚无结果时各阶段时长返回 -1。
     double lastGpuMs() const { return m_lastGpuMs; }
@@ -167,6 +171,7 @@ private:
     static void setTransferFunctionUniforms(GLShader *shader, const RenderTarget &renderTarget);
 
     /// 将顶点追加到当前 CPU 批次。
+    void appendVertex(const ParticleVertex &vertex);
     void appendVertices(const std::vector<ParticleVertex> &vertices);
 
     /// 为已绑定的 VBO 配置当前着色器使用的顶点属性。
@@ -321,6 +326,7 @@ private:
 
     // 两组查询帧异步轮换。若两组结果都未就绪，则跳过当前帧计时，避免阻塞合成线程。
     bool m_profiling = false;
+    bool m_logVerbose = false;
     bool m_timerNeedsCleanup = false;
     std::array<GpuTimerFrame, kGpuTimerFrameCount> m_timerFrames;
     int m_nextTimerFrame = 0;

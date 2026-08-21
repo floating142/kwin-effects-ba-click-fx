@@ -155,6 +155,13 @@
 
    <!-- 调试选项 -->
    <item>
+    <widget class="QCheckBox" name="showDebugOptionsCheckBox">
+     <property name="text"><string>Show debug options</string></property>
+     <property name="toolTip"><string>Show logging, damage and diagnostics controls</string></property>
+    </widget>
+   </item>
+
+   <item>
     <layout class="QHBoxLayout" name="logLevelLayout">
      <item>
       <widget class="QLabel" name="logLevelLabel">

@@ -12,6 +12,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 namespace KWin
@@ -43,13 +44,13 @@ public:
 
     bool empty() const { return m_points.empty(); }
     void clear() { m_points.clear(); }
-    const std::vector<TrailPoint> &points() const { return m_points; }
+    const std::deque<TrailPoint> &points() const { return m_points; }
 
 private:
     /// 插入轨迹点，并从头部移除超过容量上限的点。
     void pushPoint(const QPointF &p, bool penUp);
 
-    std::vector<TrailPoint> m_points;
+    std::deque<TrailPoint> m_points;
 };
 
 /// 单条笔划中转换到输出局部坐标的渲染采样点。
