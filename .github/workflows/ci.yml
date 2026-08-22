@@ -49,11 +49,12 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
-            appstream cmake extra-cmake-modules g++ git kwin-dev \
+            appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev \
             libepoxy-dev libkf6config-dev libkf6coreaddons-dev \
             libkf6i18n-dev libkf6kcmutils-dev libkf6windowsystem-dev \
             ninja-build pkg-config qt6-base-dev qt6-declarative-dev \
             qt6-tools-dev ripgrep libvulkan-dev
+          update-ca-certificates
 
       - uses: actions/checkout@v4
 
