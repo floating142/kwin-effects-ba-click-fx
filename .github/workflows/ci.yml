@@ -62,10 +62,11 @@ jobs:
         run: |
           version="$(dpkg-query -W -f='${Version}' kwin-dev)"
           echo "kwin-dev=${version}"
-          case "${version}" in
-            6.6.*) ;;
-            *) echo "Expected KWin 6.6.x, got ${version}" >&2; exit 1 ;;
-          esac
+          if ! dpkg --compare-versions "${version}" ge '4:6.6.0' || \
+             ! dpkg --compare-versions "${version}" lt '4:6.7.0'; then
+            echo "Expected KWin 6.6.x, got ${version}" >&2
+            exit 1
+          fi
 
       - name: Verify release
         run: JOBS=2 ./verify-release.sh build/ci
