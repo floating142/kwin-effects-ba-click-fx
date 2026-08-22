@@ -90,7 +90,13 @@ if [[ "${failed}" -ne 0 ]]; then
 fi
 
 echo "==> 配置测试构建: ${build_dir}"
-cmake -S . -B "${build_dir}" -DBUILD_TESTING=ON
+# Prefer Ninja when available. Minimal Debian/Ubuntu CI containers commonly
+# install Ninja but not GNU Make, while CMake otherwise defaults to Unix Makefiles.
+cmake_generator_args=()
+if command -v ninja >/dev/null 2>&1; then
+  cmake_generator_args=(-G Ninja)
+fi
+cmake -S . -B "${build_dir}" "${cmake_generator_args[@]}" -DBUILD_TESTING=ON
 
 echo "==> 构建"
 cmake --build "${build_dir}" -j"${JOBS:-2}"
