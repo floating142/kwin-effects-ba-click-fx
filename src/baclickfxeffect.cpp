@@ -717,8 +717,15 @@ void BaClickFxEffect::resetFrameStats()
     m_outputFrameStats.clear();
 }
 
+#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
+void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime)
+#else
 void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
+#endif
 {
+#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
+    Q_UNUSED(presentTime);
+#endif
     const auto cpuStart = logsFrames() ? std::chrono::steady_clock::now()
                                      : std::chrono::steady_clock::time_point{};
     // 使用合成器的呈现时间戳推进动画。
@@ -775,7 +782,11 @@ void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
             std::chrono::steady_clock::now() - cpuStart).count();
     }
 
+#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
+    effects->prePaintScreen(data, presentTime);
+#else
     effects->prePaintScreen(data);
+#endif
 }
 
 void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,

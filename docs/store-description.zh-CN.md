@@ -17,7 +17,7 @@ BA Click FX 是一个面向 KDE Plasma 6 / KWin 的桌面点击特效与光标�
 ## 兼容性
 
 - KDE Plasma 6
-- KWin 6.7 或更高版本
+- KWin 6.6 或更高版本
 - OpenGL 合成器
 - Wayland 会话
 

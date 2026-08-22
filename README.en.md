@@ -18,12 +18,12 @@
 
 ## Requirements
 
-- KDE Plasma 6 / KWin 6.7 or newer
+- KDE Plasma 6 / KWin 6.6 or newer
 - OpenGL compositing
-- CMake 3.20+, ECM 6.26+, Qt 6.10+ and KF6 6.26+
+- CMake 3.20+, ECM 6.22+, Qt 6.10+ and KF6 6.22+
 - KWin development files matching the running KWin version
 
-KWin native effects are ABI-bound to the exact KWin version. Rebuild this effect after upgrading KWin.
+KWin native effects are ABI-bound to the exact KWin version. This project supports KWin 6.6 and newer, but rebuild it with the matching development packages after upgrading KWin.
 
 ## Install
 
