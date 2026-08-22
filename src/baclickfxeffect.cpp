@@ -575,6 +575,7 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
     m_lastDrag = pos;
 }
 
+#ifndef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
 void BaClickFxEffect::pointerMotion(PointerMotionEvent *event)
 {
     // 输入事件采样频率可高于帧率，因此能够保留快速拖动中的帧内转折点。
@@ -593,6 +594,7 @@ void BaClickFxEffect::pointerMotion(PointerMotionEvent *event)
             std::chrono::steady_clock::now() - t0).count();
     }
 }
+#endif
 
 void BaClickFxEffect::endDrag()
 {
@@ -686,13 +688,17 @@ Region BaClickFxEffect::dirtyRegion(const Region &content) const
             continue;
         }
         const int pad = int(std::ceil(GPURenderer::bloomReachPx(devicePx, out->scale()))) + 1;
-        dirty += onOutput.grownBy(QMargins(pad, pad, pad, pad)).intersected(geometry);
+        for (const Rect &rect : onOutput.rects()) {
+            dirty += rect.grownBy(QMargins(pad, pad, pad, pad)).intersected(geometry);
+        }
         assigned += onOutput;
     }
     const Region unassigned = content.subtracted(assigned);
     if (!unassigned.isEmpty()) {
         const int pad = int(std::ceil(bloomPadding())) + 1;
-        dirty += unassigned.grownBy(QMargins(pad, pad, pad, pad));
+        for (const Rect &rect : unassigned.rects()) {
+            dirty += rect.grownBy(QMargins(pad, pad, pad, pad));
+        }
     }
     return dirty;
 }
@@ -723,15 +729,15 @@ void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::mill
 void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
 #endif
 {
-#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
-    Q_UNUSED(presentTime);
-#endif
     const auto cpuStart = logsFrames() ? std::chrono::steady_clock::now()
                                      : std::chrono::steady_clock::time_point{};
     // 使用合成器的呈现时间戳推进动画。
-    const std::chrono::nanoseconds now = data.view
-        ? data.view->nextPresentationTimestamp()
-        : std::chrono::nanoseconds{0};
+    const std::chrono::nanoseconds now =
+#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
+        std::chrono::duration_cast<std::chrono::nanoseconds>(presentTime);
+#else
+        data.view ? data.view->nextPresentationTimestamp() : std::chrono::nanoseconds{0};
+#endif
 
     if (m_lastFrame.count() != 0 && now > m_lastFrame) {
         // 限制会话恢复后的异常长时间步，避免实例在单帧内跳过全部生命周期。

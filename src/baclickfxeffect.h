@@ -12,6 +12,7 @@
 #include "trailstream.h"
 
 #include <core/region.h>
+#include <input_event.h>
 #include <effect/effect.h>
 
 #include <QLoggingCategory>
@@ -51,8 +52,10 @@ public:
                      int mask, const Region &deviceRegion, LogicalOutput *screen) override;
     void postPaintScreen() override;
 
+#ifndef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
     /// 使用输入事件采样拖动轨迹，避免高回报率设备的帧内路径信息丢失。
     void pointerMotion(PointerMotionEvent *event) override;
+#endif
 
     static bool supported();
 
