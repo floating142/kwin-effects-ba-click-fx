@@ -23,15 +23,15 @@ English documentation: [README.en.md](README.en.md)
 
 ## 运行要求
 
-- KDE Plasma 6 / KWin 6.7 或更高版本
+- KDE Plasma 6 / KWin 6.6 或更高版本
 - OpenGL 合成器；项目没有 CPU 渲染回退
 - CMake 3.20+
-- ECM 6.26+
+- ECM 6.22+
 - Qt 6.10+
-- KF6 6.26+
+- KF6 6.22+
 - 与当前运行版本匹配的 KWin 开发包
 
-KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。升级 KWin 后必须用新版本开发包重新编译，否则 KWin 会忽略旧二进制。
+KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。本项目兼容 KWin 6.6 及更高版本；升级 KWin 后必须用对应版本开发包重新编译，否则 KWin 会忽略旧二进制。
 
 ## 安装
 
@@ -49,7 +49,7 @@ Fedora：
 sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
-如需运行 `verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
+如需运行 `scripts/verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
 
 在项目目录运行：
 

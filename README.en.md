@@ -18,12 +18,12 @@
 
 ## Requirements
 
-- KDE Plasma 6 / KWin 6.7 or newer
+- KDE Plasma 6 / KWin 6.6 or newer
 - OpenGL compositing
-- CMake 3.20+, ECM 6.26+, Qt 6.10+ and KF6 6.26+
+- CMake 3.20+, ECM 6.22+, Qt 6.10+ and KF6 6.22+
 - KWin development files matching the running KWin version
 
-KWin native effects are ABI-bound to the exact KWin version. Rebuild this effect after upgrading KWin.
+KWin native effects are ABI-bound to the exact KWin version. This project supports KWin 6.6 and newer, but rebuild it with the matching development packages after upgrading KWin.
 
 ## Install
 
@@ -41,7 +41,7 @@ Fedora:
 sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
-Running `verify-release.sh` additionally requires `appstream` and `ripgrep`; CI also uses
+Running `scripts/verify-release.sh` additionally requires `appstream` and `ripgrep`; CI also uses
 `ninja-build`.
 
 Run the installer as your normal user:
@@ -73,7 +73,7 @@ Use `--user` for a user installation. Add `--purge-config` to remove the saved s
 Run the build, unit tests and temporary installation checks with:
 
 ```bash
-./verify-release.sh
+./scripts/verify-release.sh
 ```
 
 Run manual rendering checks in an isolated nested KWin session with:

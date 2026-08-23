@@ -17,7 +17,7 @@ It is a parameter-level port of the Blue Archive Unity `FX_Touch` effect. Mouse 
 ## Compatibility
 
 - KDE Plasma 6
-- KWin 6.7 or newer
+- KWin 6.6 or newer
 - OpenGL compositing
 - Wayland sessions
 

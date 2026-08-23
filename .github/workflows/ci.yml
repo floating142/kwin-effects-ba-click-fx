@@ -17,8 +17,18 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Report build environment
+        run: ./scripts/ci-environment-report.sh
+
       - name: Verify release
-        run: JOBS=2 ./verify-release.sh build/ci
+        run: JOBS=2 ./scripts/verify-release.sh build/ci
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-${{ github.job }}
+          path: build-environment.txt
 
   fedora:
     runs-on: ubuntu-latest
@@ -35,5 +45,46 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Report build environment
+        run: ./scripts/ci-environment-report.sh
+
       - name: Verify release
-        run: JOBS=2 ./verify-release.sh build/ci
+        run: JOBS=2 ./scripts/verify-release.sh build/ci
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-${{ github.job }}
+          path: build-environment.txt
+
+  kubuntu:
+    runs-on: ubuntu-latest
+    container: ubuntu:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev \
+            libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev \
+            libkf6i18n-dev libkf6kcmutils-dev libkf6windowsystem-dev \
+            ninja-build pkg-config qt6-base-dev qt6-declarative-dev \
+            qt6-tools-dev ripgrep libvulkan-dev
+          update-ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Report build environment
+        run: ./scripts/ci-environment-report.sh
+
+      - name: Verify release
+        run: JOBS=2 ./scripts/verify-release.sh build/ci
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-${{ github.job }}
+          path: build-environment.txt

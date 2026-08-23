@@ -6,12 +6,12 @@
 ## 自动检查
 
 ```bash
-./verify-release.sh
+./scripts/verify-release.sh
 ```
 
 可通过 `JOBS=4` 调整并行任务数，或将自定义构建目录作为第一个参数传入。
 
-`verify-release.sh` 会在临时 `DESTDIR` 中实际安装，并检查插件、KCM、OBJ、四张贴图
+`scripts/verify-release.sh` 会在临时 `DESTDIR` 中实际安装，并检查插件、KCM、OBJ、四张贴图
 和全部 Shader。临时目录退出时自动删除，不修改用户或系统安装。
 
 ## 嵌套会话检查

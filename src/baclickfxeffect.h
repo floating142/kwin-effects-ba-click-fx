@@ -12,6 +12,7 @@
 #include "trailstream.h"
 
 #include <core/region.h>
+#include <input_event.h>
 #include <effect/effect.h>
 
 #include <QLoggingCategory>
@@ -41,14 +42,20 @@ public:
     int requestedEffectChainPosition() const override;
     QString debug(const QString &parameter) const override;
 
+#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
+    void prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime) override;
+#else
     void prePaintScreen(ScreenPrePaintData &data) override;
+#endif
     /// 绘制底层场景后，将粒子和拖尾合成到当前输出。
     void paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
                      int mask, const Region &deviceRegion, LogicalOutput *screen) override;
     void postPaintScreen() override;
 
+#ifndef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
     /// 使用输入事件采样拖动轨迹，避免高回报率设备的帧内路径信息丢失。
     void pointerMotion(PointerMotionEvent *event) override;
+#endif
 
     static bool supported();
 

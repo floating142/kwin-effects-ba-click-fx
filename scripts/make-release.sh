@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${root_dir}"
 
 version="$(sed -nE 's/^project\([^)]* VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
@@ -28,7 +28,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-"${root_dir}/verify-release.sh"
+"${root_dir}/scripts/verify-release.sh"
 
 mkdir -p "${out_dir}"
 git archive --format=tar --prefix="${name}/" HEAD | tar -xf - -C "${work_dir}"

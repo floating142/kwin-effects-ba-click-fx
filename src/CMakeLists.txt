@@ -7,6 +7,13 @@ target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE
     BA_CLICK_FX_KWIN_VERSION="${KWin_VERSION}"
 )
 
+# KWin 6.6 passes the expected presentation timestamp to prePaintScreen(),
+# while KWin 6.7 and newer removed that argument. Keep one source tree
+# buildable against both API variants.
+if(KWin_VERSION VERSION_LESS "6.7.0")
+    target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME)
+endif()
+
 # KWIN_EFFECT_FACTORY_* 宏展开后才包含 Q_OBJECT。将这些宏注册给 AutoMoc，确保
 # main.cpp 能够生成并包含对应的元对象代码。
 set_property(TARGET kwin4_effect_ba_click_fx PROPERTY AUTOMOC_MACRO_NAMES
