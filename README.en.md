@@ -41,7 +41,7 @@ Fedora:
 sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
-Running `verify-release.sh` additionally requires `appstream` and `ripgrep`; CI also uses
+Running `scripts/verify-release.sh` additionally requires `appstream` and `ripgrep`; CI also uses
 `ninja-build`.
 
 Run the installer as your normal user:
@@ -73,7 +73,7 @@ Use `--user` for a user installation. Add `--purge-config` to remove the saved s
 Run the build, unit tests and temporary installation checks with:
 
 ```bash
-./verify-release.sh
+./scripts/verify-release.sh
 ```
 
 Run manual rendering checks in an isolated nested KWin session with:

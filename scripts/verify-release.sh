@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${src_dir}"
 build_dir="${1:-build/verify}"
 
@@ -27,6 +27,7 @@ required_files=(
   shader/bloom_downsample.frag shader/bloom_prefilter.frag
   shader/bloom_upsample.frag shader/composite.frag shader/dissolve.frag
   install-local.sh uninstall-local.sh test-nested.sh
+  scripts/ci-environment-report.sh scripts/make-release.sh scripts/verify-release.sh
 )
 
 failed=0

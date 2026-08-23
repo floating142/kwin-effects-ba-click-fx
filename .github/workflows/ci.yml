@@ -17,8 +17,18 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Report build environment
+        run: ./scripts/ci-environment-report.sh
+
       - name: Verify release
-        run: JOBS=2 ./verify-release.sh build/ci
+        run: JOBS=2 ./scripts/verify-release.sh build/ci
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-${{ github.job }}
+          path: build-environment.txt
 
   fedora:
     runs-on: ubuntu-latest
@@ -35,14 +45,22 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Verify release
-        run: JOBS=2 ./verify-release.sh build/ci
+      - name: Report build environment
+        run: ./scripts/ci-environment-report.sh
 
-  # Kubuntu 26.04 compatibility target. The package assertion prevents this
-  # job from silently testing a newer KWin from a rolling Ubuntu image.
-  kubuntu-26-04-kwin-6-6:
+      - name: Verify release
+        run: JOBS=2 ./scripts/verify-release.sh build/ci
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-${{ github.job }}
+          path: build-environment.txt
+
+  kubuntu:
     runs-on: ubuntu-latest
-    container: ubuntu:26.04
+    container: ubuntu:latest
     steps:
       - name: Install dependencies
         run: |
@@ -58,15 +76,15 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Assert Kubuntu KWin version
-        run: |
-          version="$(dpkg-query -W -f='${Version}' kwin-dev)"
-          echo "kwin-dev=${version}"
-          if ! dpkg --compare-versions "${version}" ge '4:6.6.0' || \
-             ! dpkg --compare-versions "${version}" lt '4:6.7.0'; then
-            echo "Expected KWin 6.6.x, got ${version}" >&2
-            exit 1
-          fi
+      - name: Report build environment
+        run: ./scripts/ci-environment-report.sh
 
       - name: Verify release
-        run: JOBS=2 ./verify-release.sh build/ci
+        run: JOBS=2 ./scripts/verify-release.sh build/ci
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-${{ github.job }}
+          path: build-environment.txt

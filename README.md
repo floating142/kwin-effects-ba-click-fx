@@ -49,7 +49,7 @@ Fedora：
 sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
-如需运行 `verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
+如需运行 `scripts/verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
 
 在项目目录运行：
 
