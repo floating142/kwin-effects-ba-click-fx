@@ -1028,7 +1028,7 @@ void GPURenderer::renderClickBase(const ClickInstance &inst, const QPointF &outp
 
     // 两个图层的材质队列均为 3000，同队列内保持 Prefab 子对象顺序。
     renderRing(cx, cy, inst.ring, ageSec);
-    renderTriBurstGeometry(cx, cy, inst.ring3, ageSec);
+    renderTriBurstGeometry(cx, cy, inst.ring3, ageSec, true);
 }
 
 void GPURenderer::renderClickMeshTri(const ClickInstance &inst,
@@ -1042,7 +1042,15 @@ void GPURenderer::renderClickMeshTri(const ClickInstance &inst,
 void GPURenderer::renderTriBurst(const TriBurstInstance &inst, const QPointF &outputOrigin)
 {
     const QPointF local = inst.center - outputOrigin;
-    renderTriBurstGeometry(local.x(), local.y(), inst.burst, inst.age);
+    renderTriBurstGeometry(local.x(), local.y(), inst.burst, inst.age, false);
+}
+
+void GPURenderer::flushTriBursts()
+{
+    // Ring4 全部使用同一材质和 One/One 加法混合，可保持顶点顺序后一次性提交。
+    glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
+    flushVertices(m_shaderAdditive, m_texTriangle.get());
+    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsystem &params,
@@ -1067,6 +1075,18 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
         m_trailDirs.resize(n > 1 ? n - 1 : 0);
         std::vector<QPointF> &normals = m_trailNormals;
         std::vector<QPointF> &dirs = m_trailDirs;
+        m_trailStyles.resize(n);
+        for (std::size_t i = 0; i < n; i++) {
+            const double alpha = evalTrailGradientAlpha(params, s[i].headT);
+            const baclickfx::Rgb rgb = evalTrailGradientColor(params, s[i].headT);
+            m_trailStyles[i] = TrailVertexStyle{
+                s[i].width * 0.5,
+                static_cast<float>(rgb[0] * hdrGain),
+                static_cast<float>(rgb[1] * hdrGain),
+                static_cast<float>(rgb[2] * hdrGain),
+                static_cast<float>(alpha),
+            };
+        }
         QPointF lastDir(1, 0);
         for (std::size_t i = 0; i + 1 < n; i++) {
             const double dx = s[i + 1].pos.x() - s[i].pos.x();
@@ -1089,26 +1109,26 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
         // 每段由两个三角形组成。顶点色沿轨迹渐变，HDR 倍率已预乘到 RGB。
         std::vector<ParticleVertex> &strip = m_trailStrip;
         strip.clear();
-        strip.reserve((n - 1) * 6);
+        const int cornerVertices = std::max(0, params.numCornerVertices);
+        const int capVertices = std::max(0, params.numCapVertices);
+        const std::size_t cornerTriangles = n > 2
+            ? (n - 2) * static_cast<std::size_t>(cornerVertices + 1) : 0;
+        const std::size_t capTriangles = dirs.empty() || capVertices == 0
+            ? 0 : 2 * static_cast<std::size_t>(capVertices + 1);
+        strip.reserve((n - 1) * 6 + cornerTriangles * 3 + capTriangles * 3);
 
         const auto vertexAtOffset = [&](std::size_t i, const QPointF &offset,
                                         double textureV) {
             // 宽度使用 Unity 参数的直接换算值：
             // widthMultiplier 0.005 × widthCurve(恒 1.0) × kUnitySizeToPx = 0.9 逻辑像素，
             // TrailRenderer_13 的 Transform_12 localScale 也是 1.0，不存在其他缩放因子。
-            const double half = s[i].width * 0.5;
-            const double alpha = evalTrailGradientAlpha(params, s[i].headT);
-            // 颜色由 Unity 渐变从笔头亮蓝过渡到笔尾黑色，透明度沿全长保持为 1。
-            const baclickfx::Rgb rgb = evalTrailGradientColor(params, s[i].headT);
+            const TrailVertexStyle &style = m_trailStyles[i];
             return ParticleVertex{
-                static_cast<float>(s[i].pos.x() + offset.x() * half),
-                static_cast<float>(s[i].pos.y() + offset.y() * half),
+                static_cast<float>(s[i].pos.x() + offset.x() * style.halfWidth),
+                static_cast<float>(s[i].pos.y() + offset.y() * style.halfWidth),
                 // u 沿轨迹长度，v 横跨拖尾宽度；纹理自身提供横向软边。
                 static_cast<float>(s[i].textureU), static_cast<float>(textureV),
-                static_cast<float>(rgb[0] * hdrGain),
-                static_cast<float>(rgb[1] * hdrGain),
-                static_cast<float>(rgb[2] * hdrGain),
-                static_cast<float>(alpha),
+                style.r, style.g, style.b, style.a,
             };
         };
 
@@ -1135,7 +1155,6 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
 
         // TrailRenderer_13 的 numCornerVertices 为 4。转角外侧使用以角平分外点
         // 为锚的三角扇补齐，边界仅与主带共边。
-        const int cornerVertices = std::max(0, params.numCornerVertices);
         for (std::size_t i = 1; i + 1 < n && cornerVertices > 0; i++) {
             const QPointF dIn = dirs[i - 1];
             const QPointF dOut = dirs[i];
@@ -1164,7 +1183,6 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
         }
 
         // numCapVertices 为 1：首尾分别沿反向和正向切线生成半圆端帽。
-        const int capVertices = std::max(0, params.numCapVertices);
         if (capVertices > 0 && !dirs.empty()) {
             const auto addCap = [&](std::size_t i, const QPointF &dir, bool startCap) {
                 const QPointF normal(-dir.y(), dir.x());
@@ -1642,7 +1660,7 @@ void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub
 }
 
 void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmission &sub,
-                                         double ageSec)
+                                         double ageSec, bool flush)
 {
     for (const TriParticle &item : sub.particles) {
         const double progress = layerProgress(item.durationSec, ageSec);
@@ -1713,10 +1731,13 @@ void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmi
         }
     }
 
-    // Ring3/Ring4 使用 BaTouchAdditive.shader 的 One/One 加法混合。
-    glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
-    flushVertices(m_shaderAdditive, m_texTriangle.get());
-    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);  // 恢复帧内默认状态。
+    if (flush) {
+        // Ring3 仍在每个点击实例内紧跟 Ring 提交，保持 Unity 子对象顺序不变。
+        glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
+        flushVertices(m_shaderAdditive, m_texTriangle.get());
+        glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE,
+                            GL_ONE_MINUS_SRC_ALPHA);
+    }
 }
 
 } // namespace KWin

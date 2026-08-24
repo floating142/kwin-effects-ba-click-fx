@@ -100,6 +100,9 @@ public:
     /// 绘制一次 Ring4 距离发射粒子簇。
     void renderTriBurst(const TriBurstInstance &inst, const QPointF &outputOrigin);
 
+    /// 一次性提交此前由 renderTriBurst() 追加的全部 Ring4 几何。
+    void flushTriBursts();
+
     /// 绘制拖尾；宽度和纹理重复间距从 `params.worldUnitPx` 派生。
     void renderTrail(const TrailStream &trail, const baclickfx::Subsystem &params,
                      const QPointF &outputOrigin);
@@ -194,7 +197,7 @@ private:
 
     /// 生成始终面向屏幕的 Ring3/Ring4 几何，并追加到当前批次。
     void renderTriBurstGeometry(double cx, double cy, const TriBurstEmission &sub,
-                                double ageSec);
+                                double ageSec, bool flush);
 
     // 渲染资源。
     // Unity 原始贴图。
@@ -278,7 +281,15 @@ private:
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
     std::vector<ParticleVertex> m_vertices;
+    struct TrailVertexStyle {
+        double halfWidth = 0.0;
+        float r = 0.0f;
+        float g = 0.0f;
+        float b = 0.0f;
+        float a = 0.0f;
+    };
     std::vector<StrokeData> m_trailStrokes;
+    std::vector<TrailVertexStyle> m_trailStyles;
     std::vector<QPointF> m_trailNormals;
     std::vector<QPointF> m_trailDirs;
     std::vector<ParticleVertex> m_trailStrip;

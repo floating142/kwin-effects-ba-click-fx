@@ -65,6 +65,7 @@ struct StrokeSample
 struct StrokeData
 {
     std::vector<StrokeSample> samples;
+    std::vector<double> segmentLengths;
     double totalLength = 0.0;
 };
 

@@ -750,7 +750,7 @@ void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
 
     // 持续拖尾只在光标近期确实移动时保持发射；停止移动后结束会话，让已有轨迹按
     // Unity 的 0.3 秒寿命自然淡出，避免空闲时永久维持重绘循环。
-    if (m_autoTrailSession
+    if (m_autoTrailSession && !m_alwaysTrail
         && std::chrono::steady_clock::now() - m_lastAutoTrailMotion
             > kAutoTrailIdleTimeout) {
         endDrag();
@@ -1157,6 +1157,7 @@ bool BaClickFxEffect::renderGpu(const RenderTarget &renderTarget, const RenderVi
         m_gpu.renderTriBurst(inst, origin);
         inst.drawn = true;
     }
+    m_gpu.flushTriBursts();
 
     // Unity 按材质 Render Queue 全局排序：MeshTri=4499，其余粒子=3000。
     // 因此所有点击实例与 Ring4 的 3000 层都结束后，才统一提交 MeshTri。
@@ -1226,16 +1227,31 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
     const bool isDown = buttons & Qt::LeftButton;
 
     if (!wasDown && isDown) {
-        if (m_dragging) {
-            endDrag();
+        // AlwaysTrail 会话已经在鼠标移动时建立；左键按下只改变会话模式，
+        // 不要结束并重新创建拖尾，否则一次点击或切换输入模式会产生断裂的新轨迹。
+        if (!m_dragging) {
+            startDrag(pos);
         }
         spawn(pos);
-        startDrag(pos);
+        m_autoTrailSession = false;
+        m_lastDrag = pos;
+        m_trailEmit = pos;
+        m_trailEmitValid = true;
         // 从非活动状态切换后请求一个最小区域以启动帧循环；完整 Region 将由随后的
         // prePaintScreen() 加入 data.paint。
         effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
     } else if (wasDown && !isDown) {
-        endDrag();
+        if (m_alwaysTrail && trailEnabled() && m_dragging) {
+            // 释放左键后继续复用同一会话，切回自动拖尾模式。静止期间保留会话，
+            // 下一次移动继续同一笔划，不产生断点或新的 TrailSession。
+            m_autoTrailSession = true;
+            m_lastAutoTrailMotion = std::chrono::steady_clock::now();
+            m_lastDrag = pos;
+            m_trailEmit = pos;
+            m_trailEmitValid = true;
+        } else {
+            endDrag();
+        }
     } else if (pos != oldPos && (isDown || (m_alwaysTrail && trailEnabled()))) {
         if (!m_dragging) {
             startDrag(oldPos);

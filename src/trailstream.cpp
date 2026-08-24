@@ -153,10 +153,14 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
         }
         StrokeData &data = out[outputCount++];
         data.samples.clear();
+        data.segmentLengths.clear();
         data.totalLength = 0.0;
         // 先累计整段长度，再按长度归一化采样宽度和颜色。
+        data.segmentLengths.reserve(strokeEnd - strokeStart - 1);
         for (std::size_t i = strokeStart + 1; i < strokeEnd; i++) {
-            data.totalLength += QLineF(pts[i - 1].pos, pts[i].pos).length();
+            const double length = QLineF(pts[i - 1].pos, pts[i].pos).length();
+            data.segmentLengths.push_back(length);
+            data.totalLength += length;
         }
 
         data.samples.reserve(strokeEnd - strokeStart);
@@ -177,7 +181,7 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
             data.samples.push_back(s);
 
             if (i + 1 < strokeEnd) {
-                pathLength += QLineF(pts[i].pos, pts[i + 1].pos).length();
+                pathLength += data.segmentLengths[i - strokeStart];
             }
         }
 
