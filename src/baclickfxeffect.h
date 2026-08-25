@@ -87,7 +87,7 @@ private:
     void drawDebugDamage(const RenderTarget &renderTarget, const RenderViewport &viewport);
 
     /// 返回不含 Bloom 外扩的保守稀疏内容区域，使用全局逻辑坐标。
-    Region contentRegion() const;
+    Region contentRegion();
 
     /// 按各输出 Bloom 最大传播半径扩展内容区域。
     Region dirtyRegion(const Region &content) const;
@@ -156,6 +156,7 @@ private:
         TrailStream stream;
         baclickfx::Subsystem trailParams;
         baclickfx::Subsystem ring4Params;
+        std::vector<StrokeData> strokes;
         bool active = false;
     };
     std::vector<TrailSession> m_trails;
@@ -187,6 +188,13 @@ private:
     Region m_lastDirty;
     // 未做 Bloom 外扩的内容区域。
     Region m_lastContent;
+
+    // contentRegion() 为当前模拟快照计算的保守包围盒；逐输出渲染只做相交判断，
+    // 避免多输出重复求值曲线、三角函数和 MeshTri 顶点。
+    std::vector<QRectF> m_clickBaseBounds;
+    std::vector<QRectF> m_clickMeshBounds;
+    std::vector<QRectF> m_burstBounds;
+    std::vector<QRectF> m_trailBounds;
 
     // 上一帧合成区域用于在内容消失后额外重绘一次，清除残留像素。
     bool m_paintedLastFrame = false;

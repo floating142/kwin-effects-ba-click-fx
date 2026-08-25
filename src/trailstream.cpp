@@ -114,16 +114,15 @@ Rgb evalTrailGradientColor(const baclickfx::Subsystem &trail, double tNorm)
 }
 
 std::vector<StrokeData> buildTrailStrokes(const TrailStream &stream,
-                                          const baclickfx::Subsystem &trail,
-                                          const QPointF &origin)
+                                          const baclickfx::Subsystem &trail)
 {
     std::vector<StrokeData> out;
-    buildTrailStrokes(stream, trail, origin, out);
+    buildTrailStrokes(stream, trail, out);
     return out;
 }
 
 void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &trail,
-                       const QPointF &origin, std::vector<StrokeData> &out)
+                       std::vector<StrokeData> &out)
 {
     std::size_t outputCount = 0;
     const std::deque<TrailPoint> &pts = stream.points();
@@ -154,6 +153,8 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
         StrokeData &data = out[outputCount++];
         data.samples.clear();
         data.segmentLengths.clear();
+        data.directions.clear();
+        data.normals.clear();
         data.totalLength = 0.0;
         // 先累计整段长度，再按长度归一化采样宽度和颜色。
         data.segmentLengths.reserve(strokeEnd - strokeStart - 1);
@@ -174,10 +175,12 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
                 1.0 - sampleTrailTextureU(trail, pathLength, data.totalLength);
 
             StrokeSample s;
-            s.pos = pts[i].pos - origin;
+            s.pos = pts[i].pos;
             s.headT = headT;
             s.width = baseWidth * sampleTrailWidthFactor(trail, headT);
             s.textureU = texU;
+            s.alpha = evalTrailGradientAlpha(trail, headT);
+            s.color = evalTrailGradientColor(trail, headT);
             data.samples.push_back(s);
 
             if (i + 1 < strokeEnd) {
@@ -186,6 +189,27 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
         }
 
         if (data.samples.size() >= 2) {
+            const std::size_t n = data.samples.size();
+            data.directions.resize(n - 1);
+            data.normals.resize(n);
+            QPointF lastDir(1, 0);
+            for (std::size_t i = 0; i + 1 < n; i++) {
+                const double dx = data.samples[i + 1].pos.x() - data.samples[i].pos.x();
+                const double dy = data.samples[i + 1].pos.y() - data.samples[i].pos.y();
+                const double len = std::hypot(dx, dy);
+                if (len > 1e-6) {
+                    lastDir = QPointF(dx / len, dy / len);
+                }
+                data.directions[i] = lastDir;
+            }
+            for (std::size_t i = 0; i < n; i++) {
+                const QPointF dIn = data.directions[i == 0 ? 0 : i - 1];
+                const QPointF dOut = data.directions[std::min(data.directions.size() - 1, i)];
+                const double ax = -dIn.y() - dOut.y();
+                const double ay = dIn.x() + dOut.x();
+                const double inv = 1.0 / std::max(1e-6, std::hypot(ax, ay));
+                data.normals[i] = QPointF(ax * inv, ay * inv);
+            }
             // Keep the StrokeData and its sample capacity for the next output frame.
         } else {
             outputCount--;

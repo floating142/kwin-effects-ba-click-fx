@@ -74,7 +74,7 @@ QRectF triBurstBounds(const QPointF &center, const TriBurstEmission &burst, doub
     return bounds;
 }
 
-QRectF clickBounds(const ClickInstance &inst, const baclickfx::CylinderProfile &profile)
+QRectF clickBaseBounds(const ClickInstance &inst)
 {
     QRectF bounds;
 
@@ -96,6 +96,14 @@ QRectF clickBounds(const ClickInstance &inst, const baclickfx::CylinderProfile &
     if (!ring3.isNull()) {
         bounds = bounds.isNull() ? ring3 : bounds.united(ring3);
     }
+
+    return bounds;
+}
+
+QRectF clickMeshBounds(const ClickInstance &inst,
+                       const baclickfx::CylinderProfile &profile)
+{
+    QRectF bounds;
 
     // MeshTri：逐弧段、逐 OBJ 顶点执行与 renderMeshTri 相同的缩放和旋转。
     const double meshP = layerProgress(inst.meshTri.durationSec, inst.age);
@@ -620,7 +628,7 @@ void BaClickFxEffect::endDrag()
     }
 }
 
-Region BaClickFxEffect::contentRegion() const
+Region BaClickFxEffect::contentRegion()
 {
     QList<Rect> rects;
     qsizetype trailPointCount = 0;
@@ -629,17 +637,39 @@ Region BaClickFxEffect::contentRegion() const
     }
     rects.reserve(qsizetype(m_instances.size() + m_bursts.size()) + trailPointCount + 64);
 
+    m_clickBaseBounds.clear();
+    m_clickMeshBounds.clear();
+    m_burstBounds.clear();
+    m_trailBounds.clear();
+    m_clickBaseBounds.reserve(m_instances.size());
+    m_clickMeshBounds.reserve(m_instances.size());
+    m_burstBounds.reserve(m_bursts.size());
+    m_trailBounds.reserve(m_trails.size());
+
     for (const ClickInstance &inst : m_instances) {
-        appendDamageRect(rects, clickBounds(inst, m_meshes.cylinder002));
+        const QRectF base = clickBaseBounds(inst);
+        const QRectF mesh = clickMeshBounds(inst, m_meshes.cylinder002);
+        m_clickBaseBounds.push_back(base);
+        m_clickMeshBounds.push_back(mesh);
+        if (base.isNull()) {
+            appendDamageRect(rects, mesh);
+        } else if (mesh.isNull()) {
+            appendDamageRect(rects, base);
+        } else {
+            appendDamageRect(rects, base.united(mesh));
+        }
     }
     for (const TriBurstInstance &inst : m_bursts) {
-        appendDamageRect(rects, triBurstBounds(inst.center, inst.burst, inst.age));
+        m_burstBounds.push_back(triBurstBounds(inst.center, inst.burst, inst.age));
+        appendDamageRect(rects, m_burstBounds.back());
     }
     // 相邻线段分别加入 Region，避免整条轨迹退化为总包围盒。pad 覆盖 Ribbon、圆角
     // 和端帽的最大半径，因此仍为保守区域。
-    for (const TrailSession &session : m_trails) {
-        appendTrailDamage(rects, session.stream,
-                          std::max(6.0, session.trailParams.widthPx * 5.0));
+    for (TrailSession &session : m_trails) {
+        const double pad = std::max(6.0, session.trailParams.widthPx * 5.0);
+        m_trailBounds.push_back(session.stream.boundingBox(pad));
+        buildTrailStrokes(session.stream, session.trailParams, session.strokes);
+        appendTrailDamage(rects, session.stream, pad);
     }
 
     return Region::fromUnsortedRects(rects);
@@ -1131,6 +1161,11 @@ bool BaClickFxEffect::renderGpu(const RenderTarget &renderTarget, const RenderVi
 
     const QPointF origin = outputRect.topLeft();
 
+    Q_ASSERT(m_trailBounds.size() == m_trails.size());
+    Q_ASSERT(m_clickBaseBounds.size() == m_instances.size());
+    Q_ASSERT(m_clickMeshBounds.size() == m_instances.size());
+    Q_ASSERT(m_burstBounds.size() == m_bursts.size());
+
     // 背景导入使用 m_lastClearArea，以覆盖当前 dirty 之外的上一帧粒子。导入失败时
     // 跳过当前帧，避免将未初始化的私有 HDR 内容覆盖到屏幕。
     if (!m_gpu.beginFrame(renderTarget, viewport, m_lastClearArea)) {
@@ -1141,28 +1176,43 @@ bool BaClickFxEffect::renderGpu(const RenderTarget &renderTarget, const RenderVi
     m_lastSetupCpuMs = phaseMs();
 
     // 队列 3000 的固定提交顺序：Trail、Ring/Ring3、Ring4。
-    for (const TrailSession &session : m_trails) {
-        if (!session.stream.empty()) {
-            m_gpu.renderTrail(session.stream, session.trailParams, origin);
+    for (std::size_t i = 0; i < m_trails.size(); i++) {
+        const TrailSession &session = m_trails[i];
+        if (session.stream.empty()) {
+            continue;
         }
+        if (!m_trailBounds[i].intersects(outputRect)) {
+            continue;
+        }
+        m_gpu.renderTrail(session.strokes, session.trailParams, origin);
     }
     m_lastTrailCpuMs = phaseMs();
 
-    for (ClickInstance &inst : m_instances) {
-        m_gpu.renderClickBase(inst, origin);
+    for (std::size_t i = 0; i < m_instances.size(); i++) {
+        ClickInstance &inst = m_instances[i];
+        // drawn 表示实例已经经过一次有效渲染帧，与它是否落在当前输出无关。
         inst.drawn = true;
+        if (m_clickBaseBounds[i].intersects(outputRect)) {
+            m_gpu.renderClickBase(inst, origin);
+        }
     }
 
-    for (TriBurstInstance &inst : m_bursts) {
-        m_gpu.renderTriBurst(inst, origin);
+    for (std::size_t i = 0; i < m_bursts.size(); i++) {
+        TriBurstInstance &inst = m_bursts[i];
         inst.drawn = true;
+        if (m_burstBounds[i].intersects(outputRect)) {
+            m_gpu.renderTriBurst(inst, origin);
+        }
     }
     m_gpu.flushTriBursts();
 
     // Unity 按材质 Render Queue 全局排序：MeshTri=4499，其余粒子=3000。
     // 因此所有点击实例与 Ring4 的 3000 层都结束后，才统一提交 MeshTri。
-    for (const ClickInstance &inst : m_instances) {
-        m_gpu.renderClickMeshTri(inst, m_meshes.cylinder002, origin);
+    for (std::size_t i = 0; i < m_instances.size(); i++) {
+        const ClickInstance &inst = m_instances[i];
+        if (m_clickMeshBounds[i].intersects(outputRect)) {
+            m_gpu.renderClickMeshTri(inst, m_meshes.cylinder002, origin);
+        }
     }
     m_lastParticleCpuMs = phaseMs();
 

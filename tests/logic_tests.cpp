@@ -200,7 +200,7 @@ void LogicTests::trailStrokesPreservePathEndpoints()
     stream.beginStroke(QPointF(10, 20));
     stream.addSegment(QPointF(10, 20), QPointF(30, 20));
     const auto map = baclickfx::buildSubsystemMap(1.0, 1.0, 1080.0);
-    const auto strokes = buildTrailStrokes(stream, map.trail, QPointF(0, 0));
+    const auto strokes = buildTrailStrokes(stream, map.trail);
     QCOMPARE(strokes.size(), std::size_t(1));
     QCOMPARE(strokes.front().samples.size(), std::size_t(2));
     QCOMPARE(strokes.front().samples.front().pos, QPointF(10, 20));

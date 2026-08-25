@@ -53,19 +53,23 @@ private:
     std::deque<TrailPoint> m_points;
 };
 
-/// 单条笔划中转换到输出局部坐标的渲染采样点。
+/// 单条笔划中的全局逻辑坐标渲染采样点。
 struct StrokeSample
 {
     QPointF pos;
     double headT = 0.0;    // 0 表示尾部，1 表示头部。
     double width = 0.0;    // 最终逻辑像素宽度。
     double textureU = 0.0; // TrailRenderer 纹理模式计算出的 U 坐标。
+    baclickfx::Rgb color{}; // 线性 RGB，输出阶段只追加 HDR 倍率。
+    double alpha = 1.0;
 };
 
 struct StrokeData
 {
     std::vector<StrokeSample> samples;
     std::vector<double> segmentLengths;
+    std::vector<QPointF> directions;
+    std::vector<QPointF> normals;
     double totalLength = 0.0;
 };
 
@@ -74,18 +78,16 @@ struct StrokeData
  *
  * @param stream 轨迹点集。
  * @param trail TrailRenderer 子系统参数。
- * @param origin 输出左上角的全局逻辑坐标。
  * @return 至少包含两个采样点的笔划集合。
  *
  * 宽度与纹理重复间距均从 `trail.worldUnitPx` 派生，其中已包含输出高度和
  * `globalScale` 换算。
  */
 std::vector<StrokeData> buildTrailStrokes(const TrailStream &stream,
-                                          const baclickfx::Subsystem &trail,
-                                          const QPointF &origin);
+                                          const baclickfx::Subsystem &trail);
 
 void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &trail,
-                       const QPointF &origin, std::vector<StrokeData> &out);
+                       std::vector<StrokeData> &out);
 
 /// 采样 TrailRenderer 渐变颜色，并返回线性 RGB；`tNorm=0` 为头部。
 baclickfx::Rgb evalTrailGradientColor(const baclickfx::Subsystem &trail, double tNorm);

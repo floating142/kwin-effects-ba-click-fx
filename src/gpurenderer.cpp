@@ -205,11 +205,22 @@ GPURenderer::GPURenderer() = default;
 GPURenderer::~GPURenderer()
 {
     // KWin 在有效 OpenGL 上下文中卸载效果，可在此直接释放自有 OpenGL 对象。
+    const auto deleteVertexArray = [](ShaderSet &set) {
+        if (set.vao) {
+            glDeleteVertexArrays(1, &set.vao);
+            set.vao = 0;
+        }
+    };
+    deleteVertexArray(m_shaderBackground);
+    deleteVertexArray(m_shaderAlphablendAdd);
+    deleteVertexArray(m_shaderDissolve);
+    deleteVertexArray(m_shaderAdditive);
+    deleteVertexArray(m_shaderComposite);
+    deleteVertexArray(m_shaderBloomPrefilter);
+    deleteVertexArray(m_shaderBloomDownsample);
+    deleteVertexArray(m_shaderBloomUpsample);
     if (m_vbo) {
         glDeleteBuffers(1, &m_vbo);
-    }
-    if (m_vao) {
-        glDeleteVertexArrays(1, &m_vao);
     }
     if (m_activeTimerPhase >= 0) {
         glEndQuery(GL_TIME_ELAPSED);
@@ -275,12 +286,38 @@ bool GPURenderer::initialize()
         GPU_ERROR() << "code=bloom_shader_failed" << "action=bloom_disabled";
     }
 
-    // 使用私有 VAO/VBO；顶点属性位置随着色器变化，在每次绘制前重新配置。
-    glGenVertexArrays(1, &m_vao);
+    // 所有布局共享一个流式 VBO；每个已链接的 shader 使用独立 VAO 缓存属性位置。
     glGenBuffers(1, &m_vbo);
-    if (m_vao == 0 || m_vbo == 0) {
+    if (m_vbo == 0) {
         GPU_ERROR() << "code=buffer_init_failed";
         return false;
+    }
+
+    if (!initializeVertexArray(m_shaderBackground)
+        || !initializeVertexArray(m_shaderAlphablendAdd)
+        || !initializeVertexArray(m_shaderDissolve)
+        || !initializeVertexArray(m_shaderAdditive)
+        || !initializeVertexArray(m_shaderComposite)) {
+        GPU_ERROR() << "code=vertex_array_init_failed";
+        return false;
+    }
+    // Bloom shader 是可选链路；仅为成功链接的程序创建布局。
+    if ((m_shaderBloomPrefilter && !initializeVertexArray(m_shaderBloomPrefilter))
+        || (m_shaderBloomDownsample && !initializeVertexArray(m_shaderBloomDownsample))
+        || (m_shaderBloomUpsample && !initializeVertexArray(m_shaderBloomUpsample))) {
+        GPU_ERROR() << "code=bloom_vertex_array_init_failed" << "action=bloom_disabled";
+        const auto deleteVertexArray = [](ShaderSet &set) {
+            if (set.vao) {
+                glDeleteVertexArrays(1, &set.vao);
+                set.vao = 0;
+            }
+        };
+        deleteVertexArray(m_shaderBloomPrefilter);
+        deleteVertexArray(m_shaderBloomDownsample);
+        deleteVertexArray(m_shaderBloomUpsample);
+        m_shaderBloomPrefilter.shader.reset();
+        m_shaderBloomDownsample.shader.reset();
+        m_shaderBloomUpsample.shader.reset();
     }
 
     if (m_logVerbose) {
@@ -359,6 +396,28 @@ GPURenderer::ShaderSet GPURenderer::loadShader(const char *vertexFile, const cha
     set.colorLocation = set.shader->attributeLocation("color");
     set.custom0Location = set.shader->attributeLocation("custom0");
     return set;
+}
+
+bool GPURenderer::initializeVertexArray(ShaderSet &set)
+{
+    Q_ASSERT(set.shader);
+    Q_ASSERT(m_vbo);
+
+    GLint previousVao = 0;
+    GLint previousVbo = 0;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVao);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousVbo);
+
+    glGenVertexArrays(1, &set.vao);
+    if (set.vao) {
+        glBindVertexArray(set.vao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+        setVertexLayout(set);
+    }
+
+    glBindVertexArray(static_cast<GLuint>(previousVao));
+    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousVbo));
+    return set.vao != 0;
 }
 
 std::unique_ptr<GLTexture> GPURenderer::loadTexture(const char *assetName, GLenum wrapMode)
@@ -727,6 +786,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
     m_savedScissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
     glGetIntegerv(GL_SCISSOR_BOX, m_savedScissorBox);
     m_blendStateCaptured = true;
+    captureVertexState();
 
     // 在有效 OpenGL 上下文中回收 setProfiling() 标记的查询对象。
     if (m_timerNeedsCleanup) {
@@ -795,6 +855,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         if (!m_current->bgTexture || m_current->bgTexture->isNull()) {
             GPU_ERROR() << "code=background_texture_alloc_failed" << m_current->devicePx;
             finishGpuTimingFrame(false);
+            restoreVertexState();
             restoreBlendState();
             return false;
         }
@@ -804,6 +865,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         if (!m_current->bgFbo->valid()) {
             GPU_ERROR() << "code=background_fbo_failed";
             finishGpuTimingFrame(false);
+            restoreVertexState();
             restoreBlendState();
             return false;
         }
@@ -833,6 +895,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
                                 << "无法取得桌面像素，插件不会绘制";
                 }
                 finishGpuTimingFrame(false);
+                restoreVertexState();
                 restoreBlendState();
                 glViewport(m_savedViewport[0], m_savedViewport[1],
                            m_savedViewport[2], m_savedViewport[3]);
@@ -979,30 +1042,20 @@ void GPURenderer::drawVertices(const ShaderSet &set, const std::vector<ParticleV
         return;
     }
 
-    // 保存并恢复 KWin 原有 VAO/VBO。核心配置文件中 VAO 0 不能承载顶点属性，
-    // 因此不能以绑定 VAO 0 代替状态恢复。
-    GLint prevVao = 0;
-    GLint prevVbo = 0;
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVao);
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevVbo);
-
-    glBindVertexArray(m_vao);
+    glBindVertexArray(set.vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     // 顶点数据每帧重填且只绘制一次，使用 GL_STREAM_DRAW。
     glBufferData(GL_ARRAY_BUFFER,
                  static_cast<GLsizeiptr>(verts.size() * sizeof(ParticleVertex)),
                  verts.data(), GL_STREAM_DRAW);
 
-    setVertexLayout(set);
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size()));
-
-    glBindVertexArray(static_cast<GLuint>(prevVao));
-    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevVbo));
 }
 
 void GPURenderer::setVertexLayout(const ShaderSet &set)
 {
-    // 调用前要求 m_vao 和 m_vbo 已绑定；glVertexAttribPointer 使用当前 ARRAY_BUFFER。
+    // 调用前要求目标 ShaderSet 的 VAO 和 m_vbo 已绑定；glVertexAttribPointer 使用
+    // 当前 ARRAY_BUFFER，并由 VAO 持久保存缓冲关联、格式和属性启用状态。
     const auto bind = [](int location, int components, std::size_t offset) {
         if (location < 0) {
             return; // 跳过已被驱动优化的属性。
@@ -1053,10 +1106,11 @@ void GPURenderer::flushTriBursts()
     glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 }
 
-void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsystem &params,
+void GPURenderer::renderTrail(const std::vector<StrokeData> &strokes,
+                              const baclickfx::Subsystem &params,
                               const QPointF &outputOrigin)
 {
-    if (trail.empty()) {
+    if (strokes.empty()) {
         return;
     }
 
@@ -1064,10 +1118,16 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
 
     // TrailRenderer.colorGradient 沿轨迹求值：t=0 为笔头，t=1 为笔尾。
 
-    buildTrailStrokes(trail, params, outputOrigin, m_trailStrokes);
-    for (const StrokeData &stroke : m_trailStrokes) {
+    for (const StrokeData &stroke : strokes) {
         const std::vector<StrokeSample> &s = stroke.samples;
         const std::size_t n = s.size();
+
+        // 保持原有浮点运算顺序：先转换为输出局部坐标，再求相邻点方向。
+        m_trailLocalSamples.resize(n);
+        for (std::size_t i = 0; i < n; i++) {
+            m_trailLocalSamples[i] = s[i].pos - outputOrigin;
+        }
+        const std::vector<QPointF> &local = m_trailLocalSamples;
 
         // 使用角平分法线构造主带；转角外侧由 numCornerVertices 扇面补齐，且仅与
         // 主带共边，避免加法混合区域重叠。
@@ -1077,33 +1137,17 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
         std::vector<QPointF> &dirs = m_trailDirs;
         m_trailStyles.resize(n);
         for (std::size_t i = 0; i < n; i++) {
-            const double alpha = evalTrailGradientAlpha(params, s[i].headT);
-            const baclickfx::Rgb rgb = evalTrailGradientColor(params, s[i].headT);
             m_trailStyles[i] = TrailVertexStyle{
                 s[i].width * 0.5,
-                static_cast<float>(rgb[0] * hdrGain),
-                static_cast<float>(rgb[1] * hdrGain),
-                static_cast<float>(rgb[2] * hdrGain),
-                static_cast<float>(alpha),
+                static_cast<float>(s[i].color[0] * hdrGain),
+                static_cast<float>(s[i].color[1] * hdrGain),
+                static_cast<float>(s[i].color[2] * hdrGain),
+                static_cast<float>(s[i].alpha),
             };
         }
-        QPointF lastDir(1, 0);
-        for (std::size_t i = 0; i + 1 < n; i++) {
-            const double dx = s[i + 1].pos.x() - s[i].pos.x();
-            const double dy = s[i + 1].pos.y() - s[i].pos.y();
-            const double len = std::hypot(dx, dy);
-            if (len > 1e-6) {
-                lastDir = QPointF(dx / len, dy / len);
-            }
-            dirs[i] = lastDir;
-        }
+        std::copy(stroke.directions.begin(), stroke.directions.end(), dirs.begin());
         for (std::size_t i = 0; i < n; i++) {
-            const QPointF dIn = dirs.empty() ? QPointF(1, 0) : dirs[i == 0 ? 0 : i - 1];
-            const QPointF dOut = dirs.empty() ? QPointF(1, 0) : dirs[std::min(dirs.size() - 1, i)];
-            const double ax = -dIn.y() - dOut.y();
-            const double ay = dIn.x() + dOut.x();
-            const double inv = 1.0 / std::max(1e-6, std::hypot(ax, ay));
-            normals[i] = QPointF(ax * inv, ay * inv);
+            normals[i] = stroke.normals[i];
         }
 
         // 每段由两个三角形组成。顶点色沿轨迹渐变，HDR 倍率已预乘到 RGB。
@@ -1124,8 +1168,8 @@ void GPURenderer::renderTrail(const TrailStream &trail, const baclickfx::Subsyst
             // TrailRenderer_13 的 Transform_12 localScale 也是 1.0，不存在其他缩放因子。
             const TrailVertexStyle &style = m_trailStyles[i];
             return ParticleVertex{
-                static_cast<float>(s[i].pos.x() + offset.x() * style.halfWidth),
-                static_cast<float>(s[i].pos.y() + offset.y() * style.halfWidth),
+                static_cast<float>(local[i].x() + offset.x() * style.halfWidth),
+                static_cast<float>(local[i].y() + offset.y() * style.halfWidth),
                 // u 沿轨迹长度，v 横跨拖尾宽度；纹理自身提供横向软边。
                 static_cast<float>(s[i].textureU), static_cast<float>(textureV),
                 style.r, style.g, style.b, style.a,
@@ -1240,6 +1284,26 @@ void GPURenderer::restoreBlendState()
     } else {
         glDisable(GL_SCISSOR_TEST);
     }
+}
+
+void GPURenderer::captureVertexState()
+{
+    Q_ASSERT(!m_vertexStateCaptured);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &m_savedVao);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &m_savedVbo);
+    m_vertexStateCaptured = true;
+}
+
+void GPURenderer::restoreVertexState()
+{
+    if (!m_vertexStateCaptured) {
+        return;
+    }
+
+    // 核心配置中 VAO 0 不能承载属性状态，因此必须恢复入口处的真实绑定。
+    glBindVertexArray(static_cast<GLuint>(m_savedVao));
+    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(m_savedVbo));
+    m_vertexStateCaptured = false;
 }
 
 bool GPURenderer::renderBloom(const Region &globalChangedRegion)
@@ -1415,6 +1479,7 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     if (compositeRegion.isEmpty()) {
         // 每条返回路径都必须闭合计时查询，避免下一帧 glBeginQuery() 失败。
         finishGpuTimingFrame(false);
+        restoreVertexState();
         restoreBlendState();
         return;
     }
@@ -1516,6 +1581,7 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     m_current->previousBloomSourceRegion = currentBloomSource;
 
     finishGpuTimingFrame(true);
+    restoreVertexState();
     restoreBlendState();
     glViewport(m_savedViewport[0], m_savedViewport[1],
                m_savedViewport[2], m_savedViewport[3]);

@@ -104,7 +104,8 @@ public:
     void flushTriBursts();
 
     /// 绘制拖尾；宽度和纹理重复间距从 `params.worldUnitPx` 派生。
-    void renderTrail(const TrailStream &trail, const baclickfx::Subsystem &params,
+    void renderTrail(const std::vector<StrokeData> &strokes,
+                     const baclickfx::Subsystem &params,
                      const QPointF &outputOrigin);
 
     /**
@@ -154,6 +155,8 @@ private:
     struct ShaderSet
     {
         std::unique_ptr<GLShader> shader;
+        // 顶点布局在 shader 链接后固定，初始化一次即可复用。
+        GLuint vao = 0;
         int positionLocation = -1;
         int texcoordLocation = -1;
         int colorLocation = -1;
@@ -166,6 +169,9 @@ private:
 
     /// 从 shader 目录加载、编译并链接着色器；失败时返回空 `ShaderSet`。
     ShaderSet loadShader(const char *vertexFile, const char *fragmentFile);
+
+    /// 为已链接的 shader 创建并初始化专用 VAO。
+    bool initializeVertexArray(ShaderSet &set);
 
     /// 从 assets 目录加载纹理，并应用对应的 OpenGL 环绕模式。
     std::unique_ptr<GLTexture> loadTexture(const char *assetName, GLenum wrapMode);
@@ -276,9 +282,12 @@ private:
     /// 恢复 beginFrame() 入口处的混合、视口和裁剪状态。
     void restoreBlendState();
 
+    /// 保存和恢复 beginFrame() 入口处的 VAO/VBO 绑定。
+    void captureVertexState();
+    void restoreVertexState();
+
     // KWin GLVertexBuffer 只提供两个属性槽，而本渲染器需要 position、texcoord、color
-    // 和可选的 CustomData0，因此使用私有 VAO/VBO 管理顶点布局。
-    GLuint m_vao = 0;
+    // 和可选的 CustomData0，因此使用共享 VBO 和每个 ShaderSet 的专用 VAO。
     GLuint m_vbo = 0;
     std::vector<ParticleVertex> m_vertices;
     struct TrailVertexStyle {
@@ -288,7 +297,7 @@ private:
         float b = 0.0f;
         float a = 0.0f;
     };
-    std::vector<StrokeData> m_trailStrokes;
+    std::vector<QPointF> m_trailLocalSamples;
     std::vector<TrailVertexStyle> m_trailStyles;
     std::vector<QPointF> m_trailNormals;
     std::vector<QPointF> m_trailDirs;
@@ -308,6 +317,9 @@ private:
     GLint m_savedViewport[4] = {0, 0, 0, 0};
     GLboolean m_savedScissorEnabled = GL_FALSE;
     GLint m_savedScissorBox[4] = {0, 0, 0, 0};
+    bool m_vertexStateCaptured = false;
+    GLint m_savedVao = 0;
+    GLint m_savedVbo = 0;
 
     // GPU 性能计时状态。每个采样帧包含四个连续且互不嵌套的 GL_TIME_ELAPSED 查询；
     // OpenGL 不允许同一查询目标发生嵌套。
