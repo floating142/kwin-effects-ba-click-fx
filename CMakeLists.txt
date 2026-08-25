@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-project(kwin-effects-ba-click-fx VERSION 1.0.1 LANGUAGES CXX)
+project(kwin-effects-ba-click-fx VERSION 1.0.2 LANGUAGES CXX)
 
 # 根据源文件内容生成可复现的构建标识。install-local.sh 可通过 /Effects.debug
 # 查询该值，以判断 KWin 当前加载的插件是否与本次构建一致。相同源码始终生成相同
