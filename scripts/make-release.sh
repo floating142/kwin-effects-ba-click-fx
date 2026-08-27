@@ -19,8 +19,8 @@ checksums="${out_dir}/${name}-SHA256SUMS.txt"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "${work_dir}"' EXIT
 
-# 只将构建、测试、安装及用户说明所需的文件放入源码包；CI、发布脚本和商店素材
-# 不属于源码安装包。
+# 只将构建、安装及用户说明所需的文件放入源码包；
+# CI、测试、发布脚本和商店素材不属于源码安装包。
 archive_paths=(
   CMakeLists.txt LICENSE README.md README.en.md TESTING.md TODO.md
   src config
@@ -29,22 +29,30 @@ archive_paths=(
   preview/logo.gif
 )
 
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "发布源码包必须从 Git 工作树生成 / Release archives must be created from a Git worktree" >&2
-  exit 1
-fi
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "请先提交当前修改再生成发布包 / Commit the current changes before creating a release archive" >&2
-  exit 1
+in_git_worktree=0
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  in_git_worktree=1
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "请先提交当前修改再生成发布包 / Commit the current changes before creating a release archive" >&2
+    exit 1
+  fi
 fi
 
 "${root_dir}/scripts/verify-release.sh"
 
 mkdir -p "${out_dir}"
-git archive --format=tar --prefix="${name}/" HEAD -- "${archive_paths[@]}" \
-  | tar -xf - -C "${work_dir}"
+if [[ "${in_git_worktree}" -eq 1 ]]; then
+  git archive --format=tar --prefix="${name}/" HEAD -- "${archive_paths[@]}" \
+    | tar -xf - -C "${work_dir}"
+  source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
+else
+  echo "==> 当前目录没有 Git 元数据，按发布白名单打包源码"
+  echo "==> No Git metadata found; packaging the source allowlist"
+  mkdir -p "${work_dir}/${name}"
+  cp -a --parents "${archive_paths[@]}" "${work_dir}/${name}"
+  source_date_epoch="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+fi
 
-source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || date +%s)}"
 tar --sort=name \
   --mtime="@${source_date_epoch}" \
   --owner=0 --group=0 --numeric-owner \
