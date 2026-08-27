@@ -75,7 +75,7 @@ inline constexpr double kTimeScaleMax = 5.0;
 inline constexpr double kGlobalScaleDefault = 1.0;
 
 /// 特效整体缩放倍率下限。
-inline constexpr double kGlobalScaleMin = 0.5;
+inline constexpr double kGlobalScaleMin = 0.05;
 
 /// 特效整体缩放倍率上限。
 inline constexpr double kGlobalScaleMax = 5.0;

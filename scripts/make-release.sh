@@ -19,6 +19,16 @@ checksums="${out_dir}/${name}-SHA256SUMS.txt"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "${work_dir}"' EXIT
 
+# 只将构建、测试、安装及用户说明所需的文件放入源码包；CI、发布脚本和商店素材
+# 不属于源码安装包。
+archive_paths=(
+  CMakeLists.txt LICENSE README.md README.en.md TESTING.md TODO.md
+  src config
+  assets shader po
+  install-local.sh uninstall-local.sh test-nested.sh
+  preview/logo.gif
+)
+
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "发布源码包必须从 Git 工作树生成 / Release archives must be created from a Git worktree" >&2
   exit 1
@@ -31,7 +41,8 @@ fi
 "${root_dir}/scripts/verify-release.sh"
 
 mkdir -p "${out_dir}"
-git archive --format=tar --prefix="${name}/" HEAD | tar -xf - -C "${work_dir}"
+git archive --format=tar --prefix="${name}/" HEAD -- "${archive_paths[@]}" \
+  | tar -xf - -C "${work_dir}"
 
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || date +%s)}"
 tar --sort=name \

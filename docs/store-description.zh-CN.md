@@ -31,40 +31,26 @@ KWin 原生特效与 KWin 的精确版本 ABI 绑定。升级 KWin 后，需要�
 kwin-effects-ba-click-fx-1.0.0.tar.xz
 ```
 
-本项目应从源码包安装，不提供通用的预编译二进制包。解压后，在源码目录运行：
+本项目应从源码包安装，不提供通用的预编译二进制包。
+解压后，在源码目录运行：
 
 ```bash
 ./install-local.sh --system
 ```
 
-脚本会配置、编译并安装 effect、配置模块、贴图和 Shader。安装到 `/usr` 时，脚本会在安装步骤请求管理员权限；请不要使用 `sudo ./install-local.sh`。
+脚本会配置、编译并安装 effect、配置模块、贴图和 Shader。
+安装到 `/usr` 时，脚本会在安装步骤请求管理员权限；请不要使用 `sudo ./install-local.sh`。
 
 安装后打开：
 
-**系统设置 → 外观与样式 → 桌面特效**
+**系统设置 → 窗口管理 → 桌面特效**
 
 搜索 **BA Click FX** 并启用。首次安装或升级 KWin 后，如果特效没有出现，请注销并重新登录 Plasma。
 
-用户级安装可使用：
-
-```bash
-./install-local.sh --user
-```
-
-用户级安装主要用于嵌套 KWin 测试，普通 KWin 会话通常不会自动搜索该插件路径。
-
 ## 卸载
-
-系统级安装：
 
 ```bash
 ./uninstall-local.sh --system
-```
-
-用户级安装：
-
-```bash
-./uninstall-local.sh --user
 ```
 
 ## 源码与问题反馈

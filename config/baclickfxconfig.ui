@@ -81,7 +81,7 @@
         <item>
          <widget class="QSlider" name="globalScaleSlider">
           <property name="minimum">
-           <number>50</number>
+           <number>5</number>
           </property>
           <property name="maximum">
            <number>500</number>

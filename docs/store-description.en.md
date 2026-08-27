@@ -31,40 +31,26 @@ Download the source archive from GitHub Releases, for example:
 kwin-effects-ba-click-fx-1.0.0.tar.xz
 ```
 
-This project is intended to be installed from the source archive. It does not provide universal prebuilt binaries. Extract the archive and run from the source directory:
+This project is intended to be installed from the source archive. It does not provide universal prebuilt binaries.
+Extract the archive and run from the source directory:
 
 ```bash
 ./install-local.sh --system
 ```
 
-The script configures, builds and installs the effect, configuration module, textures and shaders. When installing to `/usr`, it requests administrator access only during the install step; do not run the whole script with `sudo`.
+The script configures, builds and installs the effect, configuration module, textures and shaders.
+When installing to `/usr`, it requests administrator access only during the install step; do not run the whole script with `sudo`.
 
 Then open:
 
-**System Settings → Appearance & Style → Desktop Effects**
+**System Settings → Window Management → Desktop Effects**
 
 Search for **BA Click FX** and enable it. After a first installation or a KWin upgrade, log out and back in if the effect is not listed.
 
-For a user installation, use:
-
-```bash
-./install-local.sh --user
-```
-
-User installation is mainly intended for nested KWin testing. A normal KWin session may not search this plugin path automatically.
-
 ## Uninstallation
-
-System installation:
 
 ```bash
 ./uninstall-local.sh --system
-```
-
-User installation:
-
-```bash
-./uninstall-local.sh --user
 ```
 
 ## Source code and support

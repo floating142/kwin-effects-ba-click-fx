@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.20)
 
 project(kwin-effects-ba-click-fx VERSION 1.0.2 LANGUAGES CXX)
 
+# 普通源码构建默认不编译测试；CI 和开发者可用 -DBUILD_TESTING=ON 显式启用。
+option(BUILD_TESTING "Build the test suite" OFF)
+
 # 根据源文件内容生成可复现的构建标识。install-local.sh 可通过 /Effects.debug
 # 查询该值，以判断 KWin 当前加载的插件是否与本次构建一致。相同源码始终生成相同
 # 标识，不依赖编译日期或时间。
