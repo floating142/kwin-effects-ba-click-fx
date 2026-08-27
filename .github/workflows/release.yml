@@ -45,4 +45,5 @@ jobs:
           gh release upload "${RELEASE_TAG}"
           dist/kwin-effects-ba-click-fx-*.tar.xz
           dist/kwin-effects-ba-click-fx-*-SHA256SUMS.txt
+          --repo "${GITHUB_REPOSITORY}"
           --clobber
