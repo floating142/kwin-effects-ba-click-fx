@@ -1,0 +1,107 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: kwin-effects-ba-click-fx\n"
+"Language: zh_TW\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Overall scaling:"
+msgstr "整體縮放："
+
+msgid "Enable per-display scaling"
+msgstr "啟用顯示器獨立縮放"
+
+msgid "Reset to 1.00"
+msgstr "還原為 1.00"
+
+msgid "Global"
+msgstr "全域"
+
+msgid "Time scale:"
+msgstr "時間縮放："
+
+msgid "Below 1 slows down, above 1 speeds up the effect"
+msgstr "小於 1 會放慢，大於 1 會加快整套特效"
+
+msgid "Scale all elements"
+msgstr "縮放所有元素"
+
+msgid "Trail"
+msgstr "拖尾"
+
+msgid "Enable trail"
+msgstr "啟用拖尾"
+
+msgid "Show a ribbon while dragging with the left button"
+msgstr "按住滑鼠左鍵拖曳時顯示帶狀光效"
+
+msgid "Always show trail"
+msgstr "始終顯示拖尾"
+
+msgid "Show trail during pointer movement; may increase GPU usage"
+msgstr "游標移動時持續顯示拖尾，可能會增加 GPU 使用量"
+
+msgid "Enable distance particles"
+msgstr "啟用沿途粒子"
+
+msgid "Emit triangles by traveled distance"
+msgstr "依照拖曳距離發射三角形粒子"
+
+msgid "Show debug options"
+msgstr "顯示除錯選項"
+
+msgid "Show logging, damage and diagnostics controls"
+msgstr "顯示日誌、重繪區域及診斷控制項"
+
+msgid "Log level:"
+msgstr "日誌等級："
+
+msgid "Off"
+msgstr "關閉"
+
+msgid "Errors"
+msgstr "錯誤"
+
+msgid "Instances"
+msgstr "實例"
+
+msgid "Frame stats"
+msgstr "影格統計"
+
+msgid "Verbose"
+msgstr "詳細除錯"
+
+msgid "Show damage borders"
+msgstr "顯示重繪區域邊框"
+
+msgid "Show requested regions; disable for performance tests"
+msgstr "顯示特效要求的重繪區域；進行效能測試時請停用"
+
+msgid "Copy diagnostics"
+msgstr "複製診斷資訊"
+
+msgid "Copy plugin, GPU, output and resource status"
+msgstr "複製外掛程式、GPU、輸出及資源狀態"
+
+msgid "Generate report"
+msgstr "產生報告"
+
+msgid "Save status and recent logs to the diagnostics cache"
+msgstr "將目前狀態與近期日誌儲存至診斷快取"
+
+msgid "Open diagnostics folder"
+msgstr "開啟診斷資料夾"
+
+msgid "Open the diagnostics cache folder"
+msgstr "開啟診斷快取資料夾"
+
+msgid "Copied"
+msgstr "已複製"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Generated"
+msgstr "已產生"
+
+msgid "%1 (%2x%3)"
+msgstr "%1（%2x%3）"

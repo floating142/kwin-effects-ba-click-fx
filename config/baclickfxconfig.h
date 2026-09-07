@@ -4,6 +4,9 @@
 #pragma once
 
 #include <KCModule>
+#include <QHash>
+#include <QPointer>
+#include <QSet>
 
 #include "ui_baclickfxconfig.h"
 
@@ -23,6 +26,14 @@ public Q_SLOTS:
 private:
     /// 根据当前滑块值刷新数值标签。
     void updateValueLabels();
+    void rebuildOutputScaleEditors();
+    void refreshOutputMetadata();
+    QHash<QString, class QSlider *> m_outputSliders;
+    QHash<QString, class QLabel *> m_outputLabels;
+    QHash<QString, class QLabel *> m_outputNames;
+    QHash<QString, class QToolButton *> m_outputResetButtons;
+    QPointer<QWidget> m_outputScaleContainer;
+    QSet<QString> m_outputOverrides;
 
     Ui::BaClickFxEffectConfigForm m_ui;
 };

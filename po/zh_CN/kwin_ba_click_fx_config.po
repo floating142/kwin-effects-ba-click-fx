@@ -15,8 +15,8 @@ msgstr "时间缩放："
 msgid "Below 1 slows down, above 1 speeds up the effect"
 msgstr "小于 1 放慢、大于 1 加快整套特效"
 
-msgid "Overall size:"
-msgstr "整体尺寸："
+msgid "Overall scaling:"
+msgstr "整体缩放："
 
 msgid "Scale all elements"
 msgstr "放大或缩小全部图元"
@@ -98,3 +98,9 @@ msgstr "失败"
 
 msgid "Generated"
 msgstr "已生成"
+
+msgid "Enable per-display scaling"
+msgstr "启用显示器独立缩放"
+
+msgid "Reset to 1.00"
+msgstr "恢复为 1.00"

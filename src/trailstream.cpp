@@ -316,9 +316,9 @@ double distanceStepFromRing4(const baclickfx::Subsystem &ring4)
 
     // Unity 的 rateOverDistance 单位是「发射器每移动一个世界单位发射几个」，
     // 于是间距 = 1/rateOverDistance 个世界单位。再用子系统派生的
-    // worldUnitPx（= 输出高度/2 × globalScale）换到像素：
+    // worldUnitPx（= 输出高度/(2 × orthographicSize) × globalScale）换到像素：
     //
-    //     1080p、globalScale=1 时 540 / 5.0 = 108 逻辑像素一个
+    //     1080p、globalScale=1 时 400 / 5.0 = 80 逻辑像素一个
     //
     // worldUnitPx 里已经含 globalScale：整套特效放大时，发射器在世界空间里走过的
     // "距离"也按同一比例缩放，否则放大后三角密度会跟着变，比例关系就跑了。

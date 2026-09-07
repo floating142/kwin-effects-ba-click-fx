@@ -18,6 +18,7 @@
 #include <QLoggingCategory>
 #include <QHash>
 #include <QPointF>
+#include <QJsonObject>
 
 #include <chrono>
 #include <cstdint>
@@ -124,6 +125,7 @@ private:
      * 使用新输出尺度。
      */
     void ensureSubsystemsForHeight(double heightPx);
+    double outputScaleForPos(const QPointF &pos) const;
 
     /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
     int liveDistanceParticles(std::uint64_t dragSerial) const;
@@ -135,6 +137,8 @@ private:
     std::chrono::steady_clock::time_point m_lastAutoTrailMotion;
     double m_timeScale = 1.0;
     double m_globalScale = 1.0;
+    QJsonObject m_outputScaleOverrides;
+    bool m_outputScaleEnabled = baclickfx::defaults::kOutputScaleEnabledDefault;
     // 当前参数表对应的输出逻辑高度；0 表示尚未构建。
     double m_subsystemHeightPx = 0.0;
     // Ring4 粒子上限作用于单次按下；0 保留为未关联会话。

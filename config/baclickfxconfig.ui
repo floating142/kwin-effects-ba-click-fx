@@ -14,8 +14,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>520</width>
-    <height>300</height>
+    <width>600</width>
+    <height>520</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="mainLayout">
@@ -72,7 +72,7 @@
       <item row="1" column="0">
        <widget class="QLabel" name="globalScaleLabel">
         <property name="text">
-         <string>Overall size:</string>
+         <string>Overall scaling:</string>
         </property>
        </widget>
       </item>
@@ -111,6 +111,18 @@
       </item>
 
      </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QCheckBox" name="showOutputScaleCheckBox">
+     <property name="text"><string>Enable per-display scaling</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="outputScaleGroupBox">
+     <property name="title"><string/></property>
+     <layout class="QVBoxLayout" name="outputScaleLayout"/>
     </widget>
    </item>
 

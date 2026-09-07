@@ -1164,7 +1164,7 @@ void GPURenderer::renderTrail(const std::vector<StrokeData> &strokes,
         const auto vertexAtOffset = [&](std::size_t i, const QPointF &offset,
                                         double textureV) {
             // 宽度使用 Unity 参数的直接换算值：
-            // widthMultiplier 0.005 × widthCurve(恒 1.0) × kUnitySizeToPx = 0.9 逻辑像素，
+            // widthMultiplier 0.005 × widthCurve(恒 1.0) 经 Subsystem 投影换算后，
             // TrailRenderer_13 的 Transform_12 localScale 也是 1.0，不存在其他缩放因子。
             const TrailVertexStyle &style = m_trailStyles[i];
             return ParticleVertex{

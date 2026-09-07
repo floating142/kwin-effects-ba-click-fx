@@ -20,6 +20,7 @@
 
 #include <QStandardPaths>
 #include <QVector2D>
+#include <QJsonDocument>
 
 #include <algorithm>
 #include <cmath>
@@ -255,6 +256,11 @@ void BaClickFxEffect::loadConfig()
                                  def::kTimeScaleMin, def::kTimeScaleMax);
     m_globalScale = baclickfx::clamp(group.readEntry(def::kGlobalScale, def::kGlobalScaleDefault),
                                    def::kGlobalScaleMin, def::kGlobalScaleMax);
+    const QJsonDocument overrideDoc = QJsonDocument::fromJson(
+        group.readEntry(def::kOutputScaleOverrides, QByteArray()));
+    m_outputScaleOverrides = overrideDoc.isObject() ? overrideDoc.object() : QJsonObject();
+    m_outputScaleEnabled = group.readEntry(def::kOutputScaleEnabled,
+                                           def::kOutputScaleEnabledDefault);
 
     // Unity 已定义的视觉参数保持固定；以下配置只控制对应图层是否绘制。
     m_enableTrail = group.readEntry(def::kEnableTrail, def::kEnableTrailDefault);
@@ -328,6 +334,21 @@ double BaClickFxEffect::outputHeightForPos(const QPointF &pos) const
         return first->geometry().height();
     }
     return baclickfx::kReferenceHeightPx;
+}
+
+double BaClickFxEffect::outputScaleForPos(const QPointF &pos) const
+{
+    if (!m_outputScaleEnabled) return m_globalScale;
+    for (const LogicalOutput *out : effects->screens()) {
+        if (!out || !out->geometry().contains(pos.toPoint())) continue;
+        for (const QString &key : {out->uuid(), out->name()}) {
+            if (key.isEmpty() || !m_outputScaleOverrides.contains(key)) continue;
+            return baclickfx::clamp(m_outputScaleOverrides.value(key).toDouble(m_globalScale),
+                                    baclickfx::defaults::kGlobalScaleMin,
+                                    baclickfx::defaults::kGlobalScaleMax);
+        }
+    }
+    return m_globalScale;
 }
 
 void BaClickFxEffect::ensureSubsystemsForHeight(double heightPx)
@@ -414,7 +435,9 @@ QString BaClickFxEffect::debug(const QString &parameter) const
 void BaClickFxEffect::spawn(const QPointF &pos)
 {
     // 点击落在哪块屏，就按那块屏的高度换算世界单位。
-    ensureSubsystemsForHeight(outputHeightForPos(pos));
+    const double outputScale = outputScaleForPos(pos);
+    m_subsystems = baclickfx::buildSubsystemMap(m_timeScale, outputScale,
+                                                 outputHeightForPos(pos));
     ClickInstance inst = makeClickInstance(pos, m_subsystems, m_timeScale, m_rng);
     if (logsInstances()) {
         qCInfo(KWIN_BA_CLICK_FX) << "起实例" << pos << "时长" << inst.life
