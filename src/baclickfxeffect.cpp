@@ -5,6 +5,7 @@
 #include "diagnostics.h"
 #include "damageutils.h"
 #include "pathresampler.h"
+#include "outputscaleutils.h"
 
 #include <core/renderviewport.h>
 #include <effect/effecthandler.h>
@@ -21,6 +22,7 @@
 #include <QStandardPaths>
 #include <QVector2D>
 #include <QJsonDocument>
+#include <QJsonArray>
 
 #include <algorithm>
 #include <cmath>
@@ -341,7 +343,11 @@ double BaClickFxEffect::outputScaleForPos(const QPointF &pos) const
     if (!m_outputScaleEnabled) return m_globalScale;
     for (const LogicalOutput *out : effects->screens()) {
         if (!out || !out->geometry().contains(pos.toPoint())) continue;
-        for (const QString &key : {out->uuid(), out->name()}) {
+        const QString fingerprint = baclickfx::outputScaleId(
+            out->manufacturer(), out->model(), out->serialNumber(), out->name());
+        for (const QString &key : {baclickfx::preferredOutputScaleId(
+                                      out->uuid(), out->manufacturer(), out->model(),
+                                      out->serialNumber(), out->name()), fingerprint}) {
             if (key.isEmpty() || !m_outputScaleOverrides.contains(key)) continue;
             return baclickfx::clamp(m_outputScaleOverrides.value(key).toDouble(m_globalScale),
                                     baclickfx::defaults::kGlobalScaleMin,
@@ -386,6 +392,31 @@ QString BaClickFxEffect::debug(const QString &parameter) const
     if (parameter.compare(QStringLiteral("log"), Qt::CaseInsensitive) == 0
         && logsInstances()) {
         qCInfo(KWIN_BA_CLICK_FX) << "日志测试" << status;
+    }
+    if (parameter.compare(QStringLiteral("outputs-json"), Qt::CaseInsensitive) == 0) {
+        QJsonArray outputs;
+        for (const LogicalOutput *out : effects->screens()) {
+            if (!out) continue;
+            const Rect geometry = out->geometry();
+            const QString id = baclickfx::preferredOutputScaleId(
+                out->uuid(), out->manufacturer(), out->model(), out->serialNumber(), out->name());
+            outputs.append(QJsonObject{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("uuid"), out->uuid()},
+                {QStringLiteral("name"), out->name()},
+                {QStringLiteral("manufacturer"), out->manufacturer()},
+                {QStringLiteral("model"), out->model()},
+                {QStringLiteral("serial"), out->serialNumber()},
+                {QStringLiteral("x"), geometry.x()},
+                {QStringLiteral("y"), geometry.y()},
+                {QStringLiteral("logicalWidth"), geometry.width()},
+                {QStringLiteral("logicalHeight"), geometry.height()},
+                {QStringLiteral("pixelWidth"), out->pixelSize().width()},
+                {QStringLiteral("pixelHeight"), out->pixelSize().height()},
+                {QStringLiteral("scale"), out->scale()},
+            });
+        }
+        return QString::fromUtf8(QJsonDocument(outputs).toJson(QJsonDocument::Compact));
     }
     if (parameter.compare(QStringLiteral("diagnostics"), Qt::CaseInsensitive) == 0) {
         QStringList outputs;

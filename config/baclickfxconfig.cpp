@@ -4,6 +4,7 @@
 #include "baclickfxconfig.h"
 
 #include "baclickfxdefaults.h"
+#include "outputscaleutils.h"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -28,6 +29,7 @@
 #include <QUrl>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QScreen>
 #include <QSlider>
 #include <QPushButton>
@@ -35,7 +37,6 @@
 #include <QIcon>
 #include <QLabel>
 #include <QHBoxLayout>
-#include <QRegularExpression>
 
 #include <algorithm>
 
@@ -203,6 +204,26 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
         m_ui.outputScaleGroupBox->setVisible(enabled && !m_outputSliders.isEmpty());
         markAsChanged();
     });
+    connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen *) {
+        if (!needsSave()) m_outputRefreshDebounce.start();
+    });
+    connect(qApp, &QGuiApplication::screenRemoved, this, [this](QScreen *) {
+        if (!needsSave()) m_outputRefreshDebounce.start();
+    });
+    m_outputRefreshDebounce.setSingleShot(true);
+    m_outputRefreshDebounce.setInterval(100);
+    connect(&m_outputRefreshDebounce, &QTimer::timeout, this, [this]() {
+        if (!needsSave()) refreshOutputMetadata();
+    });
+    m_outputRefreshTimeout.setSingleShot(true);
+    m_outputRefreshTimeout.setInterval(2000);
+    connect(&m_outputRefreshTimeout, &QTimer::timeout, this, [this]() {
+        if (m_outputRefreshWatcher) {
+            m_outputRefreshWatcher->disconnect(this);
+            m_outputRefreshWatcher->deleteLater();
+            m_outputRefreshWatcher = nullptr;
+        }
+    });
 }
 
 void BaClickFxEffectConfig::rebuildOutputScaleEditors()
@@ -232,19 +253,22 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
             .readEntry(def::kOutputScaleOverrides, QByteArray())).object();
     const double global = m_ui.globalScaleSlider->value() / double(kSliderScale);
     for (QScreen *screen : QGuiApplication::screens()) {
-        const QString id = screen->name();
-        auto *row = new QHBoxLayout;
+        const QString fallbackId = baclickfx::outputScaleId(
+            screen->manufacturer(), screen->model(), screen->serialNumber(), screen->name());
+        const QString id = m_outputIds.value(screen->name(), fallbackId);
+        auto *rowWidget = new QWidget(container);
+        auto *row = new QHBoxLayout(rowWidget);
+        row->setContentsMargins(0, 0, 0, 0);
         // QScreen::devicePixelRatio() may be rounded independently of KWin's
         // fractional output scale. Logical DPI preserves the actual 1.60 factor.
-        const qreal scale = screen->logicalDotsPerInch() / 96.0;
-        const QSize native = (QSizeF(screen->size()) * scale).toSize();
+        const QSize native = m_outputNativeSizes.value(screen->name(), screen->size());
         auto *name = new QLabel(i18n("%1 (%2x%3)").arg(screen->name())
                                     .arg(native.width()).arg(native.height()),
-                                m_ui.outputScaleGroupBox);
+                                rowWidget);
         name->setMinimumWidth(180);
-        auto *slider = new QSlider(Qt::Horizontal, m_ui.outputScaleGroupBox);
-        auto *value = new QLabel(m_ui.outputScaleGroupBox);
-        auto *reset = new QToolButton(m_ui.outputScaleGroupBox);
+        auto *slider = new QSlider(Qt::Horizontal, rowWidget);
+        auto *value = new QLabel(rowWidget);
+        auto *reset = new QToolButton(rowWidget);
         reset->setIcon(QIcon::fromTheme(QStringLiteral("edit-undo")));
         reset->setAccessibleName(i18n("Reset to 1.00"));
         slider->setRange(int(def::kGlobalScaleMin * kSliderScale), int(def::kGlobalScaleMax * kSliderScale));
@@ -257,7 +281,7 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
         row->addWidget(slider, 1);
         row->addWidget(value);
         row->addWidget(reset);
-        rows->addLayout(row);
+        rows->addWidget(rowWidget);
         m_outputSliders.insert(id, slider);
         m_outputLabels.insert(id, value);
         m_outputNames.insert(id, name);
@@ -271,7 +295,7 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
                 v != int(def::kGlobalScaleDefault * kSliderScale));
             markAsChanged();
         });
-        connect(reset, &QPushButton::clicked, this, [this, id]() {
+        connect(reset, &QToolButton::clicked, this, [this, id]() {
             QSlider *output = m_outputSliders.value(id);
             if (!output) return;
             QSignalBlocker blocker(output);
@@ -293,41 +317,41 @@ void BaClickFxEffectConfig::refreshOutputMetadata()
     QDBusMessage message = QDBusMessage::createMethodCall(
         QStringLiteral("org.kde.KWin"), QStringLiteral("/Effects"),
         QStringLiteral("org.kde.kwin.Effects"), QStringLiteral("debug"));
-    message << QStringLiteral("kwin4_effect_ba_click_fx") << QStringLiteral("diagnostics");
+    message << QStringLiteral("kwin4_effect_ba_click_fx") << QStringLiteral("outputs-json");
+    if (m_outputRefreshWatcher) {
+        m_outputRefreshWatcher->deleteLater();
+        m_outputRefreshWatcher = nullptr;
+    }
     auto *watcher = new QDBusPendingCallWatcher(
         QDBusConnection::sessionBus().asyncCall(message), this);
+    m_outputRefreshWatcher = watcher;
+    m_outputRefreshTimeout.start();
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
             [this](QDBusPendingCallWatcher *call) {
         const QDBusPendingReply<QString> reply = *call;
         if (!reply.isError()) {
-            const QString text = reply.value();
-            const QRegularExpression re(QStringLiteral("(\\d+)x(\\d+)\\+(-?\\d+)\\+(-?\\d+)@([0-9.]+)"));
-            auto it = m_outputLabels.begin();
-            while (it != m_outputLabels.end()) {
-                QScreen *screen = nullptr;
-                for (QScreen *candidate : QGuiApplication::screens()) {
-                    if (candidate->name() == it.key()) { screen = candidate; break; }
+            const QJsonDocument document = QJsonDocument::fromJson(reply.value().toUtf8());
+            if (document.isArray()) {
+                m_outputIds.clear();
+                m_outputNativeSizes.clear();
+                for (const QJsonValue &value : document.array()) {
+                    const QJsonObject output = value.toObject();
+                    const QString name = output.value(QStringLiteral("name")).toString();
+                    const QString id = output.value(QStringLiteral("uuid")).toString().isEmpty()
+                        ? output.value(QStringLiteral("id")).toString()
+                        : output.value(QStringLiteral("uuid")).toString();
+                    if (name.isEmpty() || id.isEmpty()) continue;
+                    m_outputIds.insert(name, id);
+                    m_outputNativeSizes.insert(name, QSize(
+                        output.value(QStringLiteral("pixelWidth")).toInt(),
+                        output.value(QStringLiteral("pixelHeight")).toInt()));
                 }
-                if (screen) {
-                    const QRect g = screen->geometry();
-                    auto match = re.match(text);
-                    while (match.hasMatch()) {
-                        if (match.captured(3).toInt() == g.x()
-                            && match.captured(4).toInt() == g.y()) {
-                            const int w = qRound(match.captured(1).toInt() * match.captured(5).toDouble());
-                            const int h = qRound(match.captured(2).toInt() * match.captured(5).toDouble());
-                            if (QLabel *name = m_outputNames.value(it.key())) {
-                                name->setText(i18n("%1 (%2x%3)").arg(screen->name()).arg(w).arg(h));
-                            }
-                            break;
-                        }
-                        match = re.match(text, match.capturedEnd());
-                    }
-                }
-                ++it;
+                if (!needsSave()) rebuildOutputScaleEditors();
             }
         }
         call->deleteLater();
+        m_outputRefreshTimeout.stop();
+        if (m_outputRefreshWatcher == call) m_outputRefreshWatcher = nullptr;
     });
 }
 

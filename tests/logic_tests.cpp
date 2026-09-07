@@ -7,6 +7,7 @@
 #include "diagnostics.h"
 #include "meshprofiles.h"
 #include "pathresampler.h"
+#include "outputscaleutils.h"
 #include "subsystems.h"
 #include "trailstream.h"
 
@@ -38,6 +39,9 @@ private Q_SLOTS:
     void trailStrokesPreservePathEndpoints();
     void meshTriRotationIntegratesCurveAndClampsMix();
     void bloomPyramidMatchesPpv2Formula();
+    void outputScaleUsesUnityOrthographicProjection();
+    void outputScaleIdIsStable();
+    void outputUuidIsPreferred();
 };
 
 void LogicTests::scalarCurveClampsAndInterpolates()
@@ -233,6 +237,32 @@ void LogicTests::bloomPyramidMatchesPpv2Formula()
     QVERIFY(std::abs(double(params.sampleScale) - 1.143856) < 1e-5);
     QVERIFY(std::abs(baclickfx::bloomReachPx(QSize(3200, 2000), 1.6)
                      - 171.50848) < 1e-4);
+}
+
+void LogicTests::outputScaleUsesUnityOrthographicProjection()
+{
+    const auto base = baclickfx::buildSubsystemMap(1.0, 1.0, 1080.0);
+    const auto large = baclickfx::buildSubsystemMap(1.0, 1.4, 1080.0);
+    QVERIFY(std::abs(base.ring.worldUnitPx - (1080.0 / (2.0 * baclickfx::kUnityOrthographicSize))) < 1e-9);
+    QVERIFY(std::abs(large.ring.worldUnitPx - base.ring.worldUnitPx * 1.4) < 1e-9);
+}
+
+void LogicTests::outputScaleIdIsStable()
+{
+    QCOMPARE(baclickfx::outputScaleId(QStringLiteral("Vendor"), QStringLiteral("Model"),
+                                      QStringLiteral("Serial"), QStringLiteral("DP-1")),
+             QStringLiteral("Vendor|Model|Serial|DP-1"));
+}
+
+void LogicTests::outputUuidIsPreferred()
+{
+    QCOMPARE(baclickfx::preferredOutputScaleId(QStringLiteral("uuid-1"), QStringLiteral("V"),
+                                                QStringLiteral("M"), QStringLiteral("S"),
+                                                QStringLiteral("DP-1")),
+             QStringLiteral("uuid-1"));
+    QCOMPARE(baclickfx::preferredOutputScaleId({}, QStringLiteral("V"), QStringLiteral("M"),
+                                                QStringLiteral("S"), QStringLiteral("DP-1")),
+             QStringLiteral("V|M|S|DP-1"));
 }
 
 QTEST_APPLESS_MAIN(LogicTests)

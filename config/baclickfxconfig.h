@@ -7,8 +7,12 @@
 #include <QHash>
 #include <QPointer>
 #include <QSet>
+#include <QSize>
+#include <QTimer>
 
 #include "ui_baclickfxconfig.h"
+
+class QDBusPendingCallWatcher;
 
 /// 读写 BA Click FX 配置并通知 KWin 重新加载参数。
 class BaClickFxEffectConfig : public KCModule
@@ -34,6 +38,11 @@ private:
     QHash<QString, class QToolButton *> m_outputResetButtons;
     QPointer<QWidget> m_outputScaleContainer;
     QSet<QString> m_outputOverrides;
+    QHash<QString, QString> m_outputIds;
+    QHash<QString, QSize> m_outputNativeSizes;
+    QTimer m_outputRefreshDebounce;
+    QTimer m_outputRefreshTimeout;
+    QPointer<QDBusPendingCallWatcher> m_outputRefreshWatcher;
 
     Ui::BaClickFxEffectConfigForm m_ui;
 };
