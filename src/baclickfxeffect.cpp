@@ -280,14 +280,8 @@ void BaClickFxEffect::loadConfig()
     m_statDeviceRectsSum = m_statRequestRectsSum = m_statBloomSourceRectsSum = 0.0;
     m_lastFrameDelta = 0.0;
 
-    // 活动实例依赖当前参数表，重建前先清空以避免引用失效。
-    m_instances.clear();
-    m_bursts.clear();
-    // 参数变化会改变拖尾宽度和寿命，因此同时清空现有拖尾。
-    m_trails.clear();
-    m_trailEmitValid = false;
-    m_trailAccum = 0;
-    m_distAccum = 0;
+    // Instances own a snapshot of their visual parameters. Keep them alive so a
+    // reconfigure affects only effects spawned afterwards.
     m_subsystemHeightPx = 0.0;
     ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
 
@@ -349,12 +343,15 @@ double BaClickFxEffect::outputScaleForPos(const QPointF &pos) const
                                       out->uuid(), out->manufacturer(), out->model(),
                                       out->serialNumber(), out->name()), fingerprint}) {
             if (key.isEmpty() || !m_outputScaleOverrides.contains(key)) continue;
-            return baclickfx::clamp(m_outputScaleOverrides.value(key).toDouble(m_globalScale),
+            return baclickfx::clamp(m_outputScaleOverrides.value(key).toDouble(
+                                        baclickfx::defaults::kGlobalScaleDefault),
                                     baclickfx::defaults::kGlobalScaleMin,
                                     baclickfx::defaults::kGlobalScaleMax);
         }
     }
-    return m_globalScale;
+    // 单独缩放开启后不再回退到整体缩放。旧配置或新接入显示器尚无记录时，
+    // 使用显示器倍率自身的默认值。
+    return baclickfx::defaults::kGlobalScaleDefault;
 }
 
 void BaClickFxEffect::ensureSubsystemsForHeight(double heightPx)
@@ -383,6 +380,44 @@ int BaClickFxEffect::requestedEffectChainPosition() const
 
 QString BaClickFxEffect::debug(const QString &parameter) const
 {
+    if (parameter.startsWith(QStringLiteral("preview:"))) {
+        const QJsonDocument doc = QJsonDocument::fromJson(parameter.mid(8).toUtf8());
+        if (doc.isObject()) {
+            auto *self = const_cast<BaClickFxEffect *>(this);
+            const QJsonObject obj = doc.object();
+            if (obj.contains(QStringLiteral("timeScale"))) {
+                self->m_timeScale = baclickfx::clamp(
+                    obj.value(QStringLiteral("timeScale")).toDouble(),
+                    baclickfx::defaults::kTimeScaleMin, baclickfx::defaults::kTimeScaleMax);
+            }
+            if (obj.contains(QStringLiteral("globalScale"))) {
+                self->m_globalScale = baclickfx::clamp(
+                    obj.value(QStringLiteral("globalScale")).toDouble(),
+                    baclickfx::defaults::kGlobalScaleMin,
+                    baclickfx::defaults::kGlobalScaleMax);
+            }
+            if (obj.contains(QStringLiteral("outputScaleEnabled"))) {
+                self->m_outputScaleEnabled = obj.value(QStringLiteral("outputScaleEnabled")).toBool();
+            }
+            if (obj.contains(QStringLiteral("outputScaleOverrides"))
+                && obj.value(QStringLiteral("outputScaleOverrides")).isObject()) {
+                self->m_outputScaleOverrides = obj.value(QStringLiteral("outputScaleOverrides")).toObject();
+            }
+            if (obj.contains(QStringLiteral("enableTrail"))) {
+                self->m_enableTrail = obj.value(QStringLiteral("enableTrail")).toBool();
+            }
+            if (obj.contains(QStringLiteral("alwaysTrail"))) {
+                self->m_alwaysTrail = obj.value(QStringLiteral("alwaysTrail")).toBool();
+            }
+            if (obj.contains(QStringLiteral("enableDistanceEmitter"))) {
+                self->m_enableDistanceEmitter = self->m_enableTrail
+                    && obj.value(QStringLiteral("enableDistanceEmitter")).toBool();
+            }
+            self->m_subsystemHeightPx = 0.0;
+            self->ensureSubsystemsForHeight(self->outputHeightForPos(effects->cursorPos()));
+        }
+        return QStringLiteral("preview-applied");
+    }
     const QString status = QStringLiteral("build=%1 logLevel=%2 debugDamage=%3 gpuReady=%4 active=%5")
         .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
         .arg(int(m_logLevel))
@@ -504,7 +539,7 @@ void BaClickFxEffect::advance(double dt)
     // 每次按下保存独立参数，使跨屏后的新拖动不改变已有拖尾寿命。
     for (TrailSession &session : m_trails) {
         session.stream.advance(
-            dt, baclickfx::clamp(session.trailParams.lifetimeSec / m_timeScale, 0.001, 60.0));
+            dt, baclickfx::clamp(session.trailParams.lifetimeSec / session.timeScale, 0.001, 60.0));
     }
     std::erase_if(m_trails, [](const TrailSession &session) {
         return !session.active && session.stream.empty();
@@ -531,6 +566,7 @@ void BaClickFxEffect::startDrag(const QPointF &pos)
     m_dragSerial++;
 
     TrailSession session;
+    session.timeScale = m_timeScale;
     session.trailParams = m_subsystems.trail;
     session.ring4Params = m_subsystems.ring4;
     session.active = true;

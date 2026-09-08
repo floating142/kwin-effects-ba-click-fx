@@ -20,6 +20,7 @@ English documentation: [README.en.md](README.en.md)
 - 支持多显示器、HiDPI 和不同输出缩放比例
 - 使用 KWin 指针事件保留高回报率鼠标的真实拖动轨迹
 - 提供 KCM 配置页、重绘区域标记和 CPU/GPU 分段性能日志
+- 设置页参数支持实时预览，点击应用后保存
 
 ## 运行要求
 

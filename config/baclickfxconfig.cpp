@@ -81,12 +81,20 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.globalScaleSlider, &QSlider::valueChanged,
             this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.timeScaleSlider, &QSlider::valueChanged, this, [this] { sendPreview(); });
+    connect(m_ui.globalScaleSlider, &QSlider::valueChanged, this, [this] { sendPreview(); });
     connect(m_ui.enableTrailCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.enableTrailCheckBox, &QCheckBox::toggled,
+            this, [this] { sendPreview(); });
     connect(m_ui.alwaysTrailCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.alwaysTrailCheckBox, &QCheckBox::toggled,
+            this, [this] { sendPreview(); });
     connect(m_ui.enableDistanceEmitterCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.enableDistanceEmitterCheckBox, &QCheckBox::toggled,
+            this, [this] { sendPreview(); });
     connect(m_ui.enableTrailCheckBox, &QCheckBox::toggled, this, [this](bool enabled) {
         m_ui.alwaysTrailCheckBox->setEnabled(enabled);
         m_ui.enableDistanceEmitterCheckBox->setEnabled(enabled);
@@ -202,7 +210,16 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     });
     connect(m_ui.showOutputScaleCheckBox, &QCheckBox::toggled, this, [this](bool enabled) {
         m_ui.outputScaleGroupBox->setVisible(enabled && !m_outputSliders.isEmpty());
+        updateGlobalScaleVisibility();
+        if (enabled) {
+            // 启用单独缩放时固定每块显示器当前滑条值。之后调整整体缩放不再
+            // 改变这些显示器的实际倍率，除非用户直接调整对应显示器滑条。
+            for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
+                m_outputOverrides.insert(it.key());
+            }
+        }
         markAsChanged();
+        sendPreview();
     });
     connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen *) {
         if (!needsSave()) m_outputRefreshDebounce.start();
@@ -275,7 +292,9 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
         reset->setAccessibleName(i18n("Reset to 1.00"));
         slider->setRange(int(def::kGlobalScaleMin * kSliderScale), int(def::kGlobalScaleMax * kSliderScale));
         const bool has = values.contains(id);
-        if (has) m_outputOverrides.insert(id);
+        if (has || m_ui.showOutputScaleCheckBox->isChecked()) {
+            m_outputOverrides.insert(id);
+        }
         slider->setValue(int((has ? values.value(id).toDouble(global) : global) * kSliderScale));
         value->setMinimumWidth(40);
         reset->setAutoRaise(true);
@@ -296,6 +315,7 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
             m_outputResetButtons.value(id)->setEnabled(
                 v != int(def::kGlobalScaleDefault * kSliderScale));
             markAsChanged();
+            sendPreview();
         });
         connect(reset, &QToolButton::clicked, this, [this, id]() {
             QSlider *output = m_outputSliders.value(id);
@@ -307,6 +327,7 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
                 def::kGlobalScaleDefault, 'f', 2));
             m_outputResetButtons.value(id)->setEnabled(false);
             markAsChanged();
+            sendPreview();
         });
     }
     layout->addWidget(container);
@@ -360,6 +381,7 @@ void BaClickFxEffectConfig::refreshOutputMetadata()
 void BaClickFxEffectConfig::load()
 {
     KCModule::load();
+    m_outputOverridesReset = false;
 
     const KConfigGroup conf = KSharedConfig::openConfig(QStringLiteral("kwinrc"))
                                   ->group(QLatin1String(def::kGroup));
@@ -389,6 +411,7 @@ void BaClickFxEffectConfig::load()
         int(def::LogLevel::Off), int(def::LogLevel::Verbose)));
     m_ui.debugDamageCheckBox->setChecked(
         conf.readEntry(def::kDebugDamage, def::kDebugDamageDefault));
+    updateGlobalScaleVisibility();
 
     // setValue() 在数值未变化时不会发出信号，因此加载后显式刷新标签。
     updateValueLabels();
@@ -402,8 +425,9 @@ void BaClickFxEffectConfig::save()
 
     conf.writeEntry(def::kTimeScale, m_ui.timeScaleSlider->value() / double(kSliderScale));
     conf.writeEntry(def::kGlobalScale, m_ui.globalScaleSlider->value() / double(kSliderScale));
-    QJsonObject overrides = QJsonDocument::fromJson(
-        conf.readEntry(def::kOutputScaleOverrides, QByteArray())).object();
+    QJsonObject overrides = m_outputOverridesReset
+        ? QJsonObject()
+        : QJsonDocument::fromJson(conf.readEntry(def::kOutputScaleOverrides, QByteArray())).object();
     for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
         if (m_outputOverrides.contains(it.key())) {
             overrides.insert(it.key(), it.value()->value() / double(kSliderScale));
@@ -423,6 +447,7 @@ void BaClickFxEffectConfig::save()
     conf.writeEntry(def::kDebugDamage, m_ui.debugDamageCheckBox->isChecked());
 
     conf.sync();
+    m_outputOverridesReset = false;
 
     KCModule::save();
 
@@ -437,12 +462,54 @@ void BaClickFxEffectConfig::save()
     QDBusConnection::sessionBus().asyncCall(message);
 }
 
+void BaClickFxEffectConfig::sendPreview()
+{
+    QDBusMessage message = QDBusMessage::createMethodCall(
+        QStringLiteral("org.kde.KWin"), QStringLiteral("/Effects"),
+        QStringLiteral("org.kde.kwin.Effects"), QStringLiteral("debug"));
+    QJsonObject preview{{QStringLiteral("timeScale"),
+                               m_ui.timeScaleSlider->value() / double(kSliderScale)},
+                              {QStringLiteral("globalScale"),
+                               m_ui.globalScaleSlider->value() / double(kSliderScale)},
+                              {QStringLiteral("outputScaleEnabled"),
+                               m_ui.showOutputScaleCheckBox->isChecked()}};
+    QJsonObject outputOverrides;
+    for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
+        if (m_outputOverrides.contains(it.key())) {
+            outputOverrides.insert(it.key(), it.value()->value() / double(kSliderScale));
+        }
+    }
+    preview.insert(QStringLiteral("outputScaleOverrides"), outputOverrides);
+    preview.insert(QStringLiteral("enableTrail"), m_ui.enableTrailCheckBox->isChecked());
+    preview.insert(QStringLiteral("alwaysTrail"), m_ui.alwaysTrailCheckBox->isChecked());
+    preview.insert(QStringLiteral("enableDistanceEmitter"),
+                   m_ui.enableDistanceEmitterCheckBox->isChecked());
+    // 先构造完整 QString，再作为 DBus 参数发送，避免 Qt 模板重载解析歧义。
+    const QString payload = QStringLiteral("preview:")
+        + QString::fromUtf8(QJsonDocument(preview).toJson(QJsonDocument::Compact));
+    // Effects.debug 的第一个参数必须是特效插件名称，第二个才是具体命令。
+    message << QStringLiteral("kwin4_effect_ba_click_fx") << payload;
+    QDBusConnection::sessionBus().asyncCall(message);
+}
+
+void BaClickFxEffectConfig::updateGlobalScaleVisibility()
+{
+    // 启用显示器单独缩放后，整体缩放不再参与计算，隐藏避免用户误调。
+    const bool visible = !m_ui.showOutputScaleCheckBox->isChecked();
+    m_ui.globalScaleLabel->setVisible(visible);
+    m_ui.globalScaleSlider->setVisible(visible);
+    m_ui.globalScaleValueLabel->setVisible(visible);
+}
+
 void BaClickFxEffectConfig::defaults()
 {
     m_ui.timeScaleSlider->setValue(int(def::kTimeScaleDefault * kSliderScale));
     m_ui.globalScaleSlider->setValue(int(def::kGlobalScaleDefault * kSliderScale));
     m_ui.showOutputScaleCheckBox->setChecked(def::kOutputScaleEnabledDefault);
+    updateGlobalScaleVisibility();
     m_outputOverrides.clear();
+    // 标记为待保存清空，避免显示器元数据尚未刷新时旧覆盖值被保留下来。
+    m_outputOverridesReset = true;
     for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
         QSignalBlocker blocker(it.value());
         it.value()->setValue(int(def::kGlobalScaleDefault * kSliderScale));

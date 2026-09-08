@@ -30,6 +30,8 @@ public Q_SLOTS:
 private:
     /// 根据当前滑块值刷新数值标签。
     void updateValueLabels();
+    void sendPreview();
+    void updateGlobalScaleVisibility();
     void rebuildOutputScaleEditors();
     void refreshOutputMetadata();
     QHash<QString, class QSlider *> m_outputSliders;
@@ -38,6 +40,7 @@ private:
     QHash<QString, class QToolButton *> m_outputResetButtons;
     QPointer<QWidget> m_outputScaleContainer;
     QSet<QString> m_outputOverrides;
+    bool m_outputOverridesReset = false;
     QHash<QString, QString> m_outputIds;
     QHash<QString, QSize> m_outputNativeSizes;
     QTimer m_outputRefreshDebounce;

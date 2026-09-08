@@ -20,6 +20,7 @@ Chinese documentation: [README.md](README.md)
 - Multi-monitor, HiDPI and different output scale support.
 - KWin pointer events preserve high-polling-rate mouse movement for accurate trails.
 - KCM configuration page, repaint-region markers and segmented CPU/GPU performance logs.
+- Live preview in the settings page; changes are saved only on Apply.
 
 ## Requirements
 

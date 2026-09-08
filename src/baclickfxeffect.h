@@ -149,7 +149,7 @@ private:
     bool m_alwaysTrail = false;
     bool m_enableDistanceEmitter = true;
 
-    // 配置重建参数表时会先清空所有依赖旧参数的实例。
+    // 当前参数表仅供之后创建的实例使用；活动实例持有自己的参数快照。
     baclickfx::SubsystemMap m_subsystems;
     baclickfx::MeshProfiles m_meshes;
     baclickfx::Rng m_rng;
@@ -158,6 +158,7 @@ private:
     std::vector<TriBurstInstance> m_bursts;
     struct TrailSession {
         TrailStream stream;
+        double timeScale = 1.0;
         baclickfx::Subsystem trailParams;
         baclickfx::Subsystem ring4Params;
         std::vector<StrokeData> strokes;
