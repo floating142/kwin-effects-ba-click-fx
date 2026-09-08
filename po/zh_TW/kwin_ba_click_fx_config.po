@@ -107,6 +107,3 @@ msgstr "失敗"
 
 msgid "Generated"
 msgstr "已產生"
-
-msgid "%1 (%2x%3)"
-msgstr "%1（%2x%3）"

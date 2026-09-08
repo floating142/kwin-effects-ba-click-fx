@@ -262,9 +262,11 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
         // QScreen::devicePixelRatio() may be rounded independently of KWin's
         // fractional output scale. Logical DPI preserves the actual 1.60 factor.
         const QSize native = m_outputNativeSizes.value(screen->name(), screen->size());
-        auto *name = new QLabel(i18n("%1 (%2x%3)").arg(screen->name())
-                                    .arg(native.width()).arg(native.height()),
-                                rowWidget);
+        const QString displayName = QStringLiteral("%1 (%2x%3)")
+            .arg(screen->name())
+            .arg(native.width())
+            .arg(native.height());
+        auto *name = new QLabel(displayName, rowWidget);
         name->setMinimumWidth(180);
         auto *slider = new QSlider(Qt::Horizontal, rowWidget);
         auto *value = new QLabel(rowWidget);
