@@ -21,6 +21,7 @@ class BaClickFxEffectConfig : public KCModule
 
 public:
     explicit BaClickFxEffectConfig(QObject *parent, const KPluginMetaData &data);
+    ~BaClickFxEffectConfig() override;
 
 public Q_SLOTS:
     void load() override;
@@ -31,6 +32,8 @@ private:
     /// 根据当前滑块值刷新数值标签。
     void updateValueLabels();
     void sendPreview();
+    void dispatchPreview();
+    void restorePersistedPreview();
     void updateGlobalScaleVisibility();
     void rebuildOutputScaleEditors();
     void refreshOutputMetadata();
@@ -44,6 +47,7 @@ private:
     QHash<QString, QString> m_outputIds;
     QHash<QString, QSize> m_outputNativeSizes;
     QTimer m_outputRefreshDebounce;
+    QTimer m_previewDebounce;
     QTimer m_outputRefreshTimeout;
     QPointer<QDBusPendingCallWatcher> m_outputRefreshWatcher;
 

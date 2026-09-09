@@ -232,6 +232,10 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     connect(&m_outputRefreshDebounce, &QTimer::timeout, this, [this]() {
         if (!needsSave()) refreshOutputMetadata();
     });
+    m_previewDebounce.setSingleShot(true);
+    m_previewDebounce.setInterval(75);
+    connect(&m_previewDebounce, &QTimer::timeout,
+            this, &BaClickFxEffectConfig::dispatchPreview);
     m_outputRefreshTimeout.setSingleShot(true);
     m_outputRefreshTimeout.setInterval(2000);
     connect(&m_outputRefreshTimeout, &QTimer::timeout, this, [this]() {
@@ -241,6 +245,13 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
             m_outputRefreshWatcher = nullptr;
         }
     });
+}
+
+BaClickFxEffectConfig::~BaClickFxEffectConfig()
+{
+    // 预览只修改 KWin 内存状态；关闭页面时恢复 kwinrc 中最后保存的值，
+    // 使取消操作真正撤销预览。
+    restorePersistedPreview();
 }
 
 void BaClickFxEffectConfig::rebuildOutputScaleEditors()
@@ -464,6 +475,12 @@ void BaClickFxEffectConfig::save()
 
 void BaClickFxEffectConfig::sendPreview()
 {
+    // 快速拖动滑条时合并请求，避免连续发送大量 DBus 消息。
+    m_previewDebounce.start();
+}
+
+void BaClickFxEffectConfig::dispatchPreview()
+{
     QDBusMessage message = QDBusMessage::createMethodCall(
         QStringLiteral("org.kde.KWin"), QStringLiteral("/Effects"),
         QStringLiteral("org.kde.kwin.Effects"), QStringLiteral("debug"));
@@ -488,6 +505,34 @@ void BaClickFxEffectConfig::sendPreview()
     const QString payload = QStringLiteral("preview:")
         + QString::fromUtf8(QJsonDocument(preview).toJson(QJsonDocument::Compact));
     // Effects.debug 的第一个参数必须是特效插件名称，第二个才是具体命令。
+    message << QStringLiteral("kwin4_effect_ba_click_fx") << payload;
+    QDBusConnection::sessionBus().asyncCall(message);
+}
+
+void BaClickFxEffectConfig::restorePersistedPreview()
+{
+    const KConfigGroup conf = KSharedConfig::openConfig(QStringLiteral("kwinrc"))
+        ->group(QLatin1String(def::kGroup));
+    QJsonObject preview{
+        {QStringLiteral("timeScale"), conf.readEntry(def::kTimeScale, def::kTimeScaleDefault)},
+        {QStringLiteral("globalScale"), conf.readEntry(def::kGlobalScale, def::kGlobalScaleDefault)},
+        {QStringLiteral("outputScaleEnabled"),
+         conf.readEntry(def::kOutputScaleEnabled, def::kOutputScaleEnabledDefault)},
+        {QStringLiteral("enableTrail"), conf.readEntry(def::kEnableTrail, def::kEnableTrailDefault)},
+        {QStringLiteral("alwaysTrail"), conf.readEntry(def::kAlwaysTrail, def::kAlwaysTrailDefault)},
+        {QStringLiteral("enableDistanceEmitter"),
+                        conf.readEntry(def::kEnableDistanceEmitter,
+                                       def::kEnableDistanceEmitterDefault)},
+    };
+    const QJsonDocument overrides = QJsonDocument::fromJson(
+        conf.readEntry(def::kOutputScaleOverrides, QByteArray()));
+    preview.insert(QStringLiteral("outputScaleOverrides"),
+                   overrides.isObject() ? overrides.object() : QJsonObject());
+    const QString payload = QStringLiteral("preview:")
+        + QString::fromUtf8(QJsonDocument(preview).toJson(QJsonDocument::Compact));
+    QDBusMessage message = QDBusMessage::createMethodCall(
+        QStringLiteral("org.kde.KWin"), QStringLiteral("/Effects"),
+        QStringLiteral("org.kde.kwin.Effects"), QStringLiteral("debug"));
     message << QStringLiteral("kwin4_effect_ba_click_fx") << payload;
     QDBusConnection::sessionBus().asyncCall(message);
 }

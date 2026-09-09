@@ -383,38 +383,7 @@ QString BaClickFxEffect::debug(const QString &parameter) const
     if (parameter.startsWith(QStringLiteral("preview:"))) {
         const QJsonDocument doc = QJsonDocument::fromJson(parameter.mid(8).toUtf8());
         if (doc.isObject()) {
-            auto *self = const_cast<BaClickFxEffect *>(this);
-            const QJsonObject obj = doc.object();
-            if (obj.contains(QStringLiteral("timeScale"))) {
-                self->m_timeScale = baclickfx::clamp(
-                    obj.value(QStringLiteral("timeScale")).toDouble(),
-                    baclickfx::defaults::kTimeScaleMin, baclickfx::defaults::kTimeScaleMax);
-            }
-            if (obj.contains(QStringLiteral("globalScale"))) {
-                self->m_globalScale = baclickfx::clamp(
-                    obj.value(QStringLiteral("globalScale")).toDouble(),
-                    baclickfx::defaults::kGlobalScaleMin,
-                    baclickfx::defaults::kGlobalScaleMax);
-            }
-            if (obj.contains(QStringLiteral("outputScaleEnabled"))) {
-                self->m_outputScaleEnabled = obj.value(QStringLiteral("outputScaleEnabled")).toBool();
-            }
-            if (obj.contains(QStringLiteral("outputScaleOverrides"))
-                && obj.value(QStringLiteral("outputScaleOverrides")).isObject()) {
-                self->m_outputScaleOverrides = obj.value(QStringLiteral("outputScaleOverrides")).toObject();
-            }
-            if (obj.contains(QStringLiteral("enableTrail"))) {
-                self->m_enableTrail = obj.value(QStringLiteral("enableTrail")).toBool();
-            }
-            if (obj.contains(QStringLiteral("alwaysTrail"))) {
-                self->m_alwaysTrail = obj.value(QStringLiteral("alwaysTrail")).toBool();
-            }
-            if (obj.contains(QStringLiteral("enableDistanceEmitter"))) {
-                self->m_enableDistanceEmitter = self->m_enableTrail
-                    && obj.value(QStringLiteral("enableDistanceEmitter")).toBool();
-            }
-            self->m_subsystemHeightPx = 0.0;
-            self->ensureSubsystemsForHeight(self->outputHeightForPos(effects->cursorPos()));
+            const_cast<BaClickFxEffect *>(this)->applyPreview(doc.object());
         }
         return QStringLiteral("preview-applied");
     }
@@ -432,39 +401,22 @@ QString BaClickFxEffect::debug(const QString &parameter) const
         QJsonArray outputs;
         for (const LogicalOutput *out : effects->screens()) {
             if (!out) continue;
-            const Rect geometry = out->geometry();
-            const QString id = baclickfx::preferredOutputScaleId(
-                out->uuid(), out->manufacturer(), out->model(), out->serialNumber(), out->name());
-            outputs.append(QJsonObject{
-                {QStringLiteral("id"), id},
-                {QStringLiteral("uuid"), out->uuid()},
-                {QStringLiteral("name"), out->name()},
-                {QStringLiteral("manufacturer"), out->manufacturer()},
-                {QStringLiteral("model"), out->model()},
-                {QStringLiteral("serial"), out->serialNumber()},
-                {QStringLiteral("x"), geometry.x()},
-                {QStringLiteral("y"), geometry.y()},
-                {QStringLiteral("logicalWidth"), geometry.width()},
-                {QStringLiteral("logicalHeight"), geometry.height()},
+            outputs.append(QJsonObject{{QStringLiteral("id"), baclickfx::preferredOutputScaleId(
+                out->uuid(), out->manufacturer(), out->model(), out->serialNumber(), out->name())},
+                {QStringLiteral("uuid"), out->uuid()}, {QStringLiteral("name"), out->name()},
                 {QStringLiteral("pixelWidth"), out->pixelSize().width()},
-                {QStringLiteral("pixelHeight"), out->pixelSize().height()},
-                {QStringLiteral("scale"), out->scale()},
-            });
+                {QStringLiteral("pixelHeight"), out->pixelSize().height()}});
         }
         return QString::fromUtf8(QJsonDocument(outputs).toJson(QJsonDocument::Compact));
     }
     if (parameter.compare(QStringLiteral("diagnostics"), Qt::CaseInsensitive) == 0) {
         QStringList outputs;
         for (const LogicalOutput *out : effects->screens()) {
-            if (!out) {
-                continue;
-            }
+            if (!out) continue;
             const Rect geometry = out->geometry();
             outputs.append(QStringLiteral("%1x%2+%3+%4@%5")
-                               .arg(geometry.width())
-                               .arg(geometry.height())
-                               .arg(geometry.x())
-                               .arg(geometry.y())
+                               .arg(geometry.width()).arg(geometry.height())
+                               .arg(geometry.x()).arg(geometry.y())
                                .arg(out->scale(), 0, 'f', 2));
         }
         const QString assetRoot = QStandardPaths::locate(
@@ -482,22 +434,47 @@ QString BaClickFxEffect::debug(const QString &parameter) const
                               "skip_target=%13 skip_import=%14")
             .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
             .arg(QStringLiteral(BA_CLICK_FX_KWIN_VERSION))
-            .arg(int(m_logLevel))
-            .arg(m_gpuReady)
-            .arg(isActive())
-            .arg(outputs.join(QLatin1Char(',')))
-            .arg(assetRoot)
-            .arg(shaderRoot)
-            .arg(m_gpu.diagnosticStatus())
-            .arg(m_skipNoActivity)
-            .arg(m_skipNoDamage)
-            .arg(m_skipGpu)
-            .arg(m_skipTarget)
-            .arg(m_skipImport);
+            .arg(int(m_logLevel)).arg(m_gpuReady).arg(isActive())
+            .arg(outputs.join(QLatin1Char(','))).arg(assetRoot).arg(shaderRoot)
+            .arg(m_gpu.diagnosticStatus()).arg(m_skipNoActivity).arg(m_skipNoDamage)
+            .arg(m_skipGpu).arg(m_skipTarget).arg(m_skipImport);
     }
     return status;
 }
 
+void BaClickFxEffect::applyPreview(const QJsonObject &obj)
+{
+            if (obj.contains(QStringLiteral("timeScale"))) {
+                m_timeScale = baclickfx::clamp(
+                    obj.value(QStringLiteral("timeScale")).toDouble(),
+                    baclickfx::defaults::kTimeScaleMin, baclickfx::defaults::kTimeScaleMax);
+            }
+            if (obj.contains(QStringLiteral("globalScale"))) {
+                m_globalScale = baclickfx::clamp(
+                    obj.value(QStringLiteral("globalScale")).toDouble(),
+                    baclickfx::defaults::kGlobalScaleMin,
+                    baclickfx::defaults::kGlobalScaleMax);
+            }
+            if (obj.contains(QStringLiteral("outputScaleEnabled"))) {
+                m_outputScaleEnabled = obj.value(QStringLiteral("outputScaleEnabled")).toBool();
+            }
+            if (obj.contains(QStringLiteral("outputScaleOverrides"))
+                && obj.value(QStringLiteral("outputScaleOverrides")).isObject()) {
+                m_outputScaleOverrides = obj.value(QStringLiteral("outputScaleOverrides")).toObject();
+            }
+            if (obj.contains(QStringLiteral("enableTrail"))) {
+                m_enableTrail = obj.value(QStringLiteral("enableTrail")).toBool();
+            }
+            if (obj.contains(QStringLiteral("alwaysTrail"))) {
+                m_alwaysTrail = obj.value(QStringLiteral("alwaysTrail")).toBool();
+            }
+            if (obj.contains(QStringLiteral("enableDistanceEmitter"))) {
+                m_enableDistanceEmitter = m_enableTrail
+                    && obj.value(QStringLiteral("enableDistanceEmitter")).toBool();
+            }
+            m_subsystemHeightPx = 0.0;
+            ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
+}
 void BaClickFxEffect::spawn(const QPointF &pos)
 {
     // 点击落在哪块屏，就按那块屏的高度换算世界单位。

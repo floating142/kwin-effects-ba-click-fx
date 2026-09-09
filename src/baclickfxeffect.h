@@ -69,6 +69,7 @@ private Q_SLOTS:
 private:
     /// 读取 `[Effect-ba-click-fx]` 配置并重建运行时参数。
     void loadConfig();
+    void applyPreview(const QJsonObject &preview);
 
     /// 定位并加载 Cylinder002 OBJ 网格。
     void loadMeshes();
