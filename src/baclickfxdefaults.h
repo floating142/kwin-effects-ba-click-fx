@@ -30,6 +30,8 @@ inline constexpr const char *kTimeScale = "TimeScale";
 
 /// 特效整体缩放倍率的配置键。
 inline constexpr const char *kGlobalScale = "GlobalScale";
+inline constexpr const char *kOutputScaleOverrides = "OutputScaleOverrides";
+inline constexpr const char *kOutputScaleEnabled = "OutputScaleEnabled";
 
 /// 拖尾开关的配置键。
 inline constexpr const char *kEnableTrail = "EnableTrail";
@@ -79,6 +81,7 @@ inline constexpr double kGlobalScaleMin = 0.05;
 
 /// 特效整体缩放倍率上限。
 inline constexpr double kGlobalScaleMax = 5.0;
+inline constexpr bool kOutputScaleEnabledDefault = false;
 
 /// 默认启用拖尾。
 inline constexpr bool kEnableTrailDefault = true;

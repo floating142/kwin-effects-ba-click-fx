@@ -20,6 +20,7 @@ English documentation: [README.en.md](README.en.md)
 - 支持多显示器、HiDPI 和不同输出缩放比例
 - 使用 KWin 指针事件保留高回报率鼠标的真实拖动轨迹
 - 提供 KCM 配置页、重绘区域标记和 CPU/GPU 分段性能日志
+- 设置页参数支持实时预览，点击应用后保存
 
 ## 运行要求
 
@@ -49,6 +50,13 @@ Fedora：
 sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
+Kubuntu：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev qt6-declarative-dev qt6-tools-dev libvulkan-dev
+```
+
 如需运行 `scripts/verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
 
 在项目目录运行：
@@ -73,6 +81,7 @@ KWin 原生插件与当前 KWin 版本绑定；升级 KWin 后需要重新编译
 
 - 时间缩放
 - 整体尺寸
+- 显示器独立缩放
 - 拖尾开关
 - 沿途小三角开关
 - 调试日志

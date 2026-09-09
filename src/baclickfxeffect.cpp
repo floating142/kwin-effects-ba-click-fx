@@ -5,6 +5,7 @@
 #include "diagnostics.h"
 #include "damageutils.h"
 #include "pathresampler.h"
+#include "outputscaleutils.h"
 
 #include <core/renderviewport.h>
 #include <effect/effecthandler.h>
@@ -20,6 +21,8 @@
 
 #include <QStandardPaths>
 #include <QVector2D>
+#include <QJsonDocument>
+#include <QJsonArray>
 
 #include <algorithm>
 #include <cmath>
@@ -255,6 +258,11 @@ void BaClickFxEffect::loadConfig()
                                  def::kTimeScaleMin, def::kTimeScaleMax);
     m_globalScale = baclickfx::clamp(group.readEntry(def::kGlobalScale, def::kGlobalScaleDefault),
                                    def::kGlobalScaleMin, def::kGlobalScaleMax);
+    const QJsonDocument overrideDoc = QJsonDocument::fromJson(
+        group.readEntry(def::kOutputScaleOverrides, QByteArray()));
+    m_outputScaleOverrides = overrideDoc.isObject() ? overrideDoc.object() : QJsonObject();
+    m_outputScaleEnabled = group.readEntry(def::kOutputScaleEnabled,
+                                           def::kOutputScaleEnabledDefault);
 
     // Unity 已定义的视觉参数保持固定；以下配置只控制对应图层是否绘制。
     m_enableTrail = group.readEntry(def::kEnableTrail, def::kEnableTrailDefault);
@@ -272,14 +280,8 @@ void BaClickFxEffect::loadConfig()
     m_statDeviceRectsSum = m_statRequestRectsSum = m_statBloomSourceRectsSum = 0.0;
     m_lastFrameDelta = 0.0;
 
-    // 活动实例依赖当前参数表，重建前先清空以避免引用失效。
-    m_instances.clear();
-    m_bursts.clear();
-    // 参数变化会改变拖尾宽度和寿命，因此同时清空现有拖尾。
-    m_trails.clear();
-    m_trailEmitValid = false;
-    m_trailAccum = 0;
-    m_distAccum = 0;
+    // Instances own a snapshot of their visual parameters. Keep them alive so a
+    // reconfigure affects only effects spawned afterwards.
     m_subsystemHeightPx = 0.0;
     ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
 
@@ -330,6 +332,28 @@ double BaClickFxEffect::outputHeightForPos(const QPointF &pos) const
     return baclickfx::kReferenceHeightPx;
 }
 
+double BaClickFxEffect::outputScaleForPos(const QPointF &pos) const
+{
+    if (!m_outputScaleEnabled) return m_globalScale;
+    for (const LogicalOutput *out : effects->screens()) {
+        if (!out || !out->geometry().contains(pos.toPoint())) continue;
+        const QString fingerprint = baclickfx::outputScaleId(
+            out->manufacturer(), out->model(), out->serialNumber(), out->name());
+        for (const QString &key : {baclickfx::preferredOutputScaleId(
+                                      out->uuid(), out->manufacturer(), out->model(),
+                                      out->serialNumber(), out->name()), fingerprint}) {
+            if (key.isEmpty() || !m_outputScaleOverrides.contains(key)) continue;
+            return baclickfx::clamp(m_outputScaleOverrides.value(key).toDouble(
+                                        baclickfx::defaults::kGlobalScaleDefault),
+                                    baclickfx::defaults::kGlobalScaleMin,
+                                    baclickfx::defaults::kGlobalScaleMax);
+        }
+    }
+    // 单独缩放开启后不再回退到整体缩放。旧配置或新接入显示器尚无记录时，
+    // 使用显示器倍率自身的默认值。
+    return baclickfx::defaults::kGlobalScaleDefault;
+}
+
 void BaClickFxEffect::ensureSubsystemsForHeight(double heightPx)
 {
     const double h = heightPx > 0.0 ? heightPx : baclickfx::kReferenceHeightPx;
@@ -356,6 +380,13 @@ int BaClickFxEffect::requestedEffectChainPosition() const
 
 QString BaClickFxEffect::debug(const QString &parameter) const
 {
+    if (parameter.startsWith(QStringLiteral("preview:"))) {
+        const QJsonDocument doc = QJsonDocument::fromJson(parameter.mid(8).toUtf8());
+        if (doc.isObject()) {
+            const_cast<BaClickFxEffect *>(this)->applyPreview(doc.object());
+        }
+        return QStringLiteral("preview-applied");
+    }
     const QString status = QStringLiteral("build=%1 logLevel=%2 debugDamage=%3 gpuReady=%4 active=%5")
         .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
         .arg(int(m_logLevel))
@@ -366,18 +397,26 @@ QString BaClickFxEffect::debug(const QString &parameter) const
         && logsInstances()) {
         qCInfo(KWIN_BA_CLICK_FX) << "日志测试" << status;
     }
+    if (parameter.compare(QStringLiteral("outputs-json"), Qt::CaseInsensitive) == 0) {
+        QJsonArray outputs;
+        for (const LogicalOutput *out : effects->screens()) {
+            if (!out) continue;
+            outputs.append(QJsonObject{{QStringLiteral("id"), baclickfx::preferredOutputScaleId(
+                out->uuid(), out->manufacturer(), out->model(), out->serialNumber(), out->name())},
+                {QStringLiteral("uuid"), out->uuid()}, {QStringLiteral("name"), out->name()},
+                {QStringLiteral("pixelWidth"), out->pixelSize().width()},
+                {QStringLiteral("pixelHeight"), out->pixelSize().height()}});
+        }
+        return QString::fromUtf8(QJsonDocument(outputs).toJson(QJsonDocument::Compact));
+    }
     if (parameter.compare(QStringLiteral("diagnostics"), Qt::CaseInsensitive) == 0) {
         QStringList outputs;
         for (const LogicalOutput *out : effects->screens()) {
-            if (!out) {
-                continue;
-            }
+            if (!out) continue;
             const Rect geometry = out->geometry();
             outputs.append(QStringLiteral("%1x%2+%3+%4@%5")
-                               .arg(geometry.width())
-                               .arg(geometry.height())
-                               .arg(geometry.x())
-                               .arg(geometry.y())
+                               .arg(geometry.width()).arg(geometry.height())
+                               .arg(geometry.x()).arg(geometry.y())
                                .arg(out->scale(), 0, 'f', 2));
         }
         const QString assetRoot = QStandardPaths::locate(
@@ -395,26 +434,53 @@ QString BaClickFxEffect::debug(const QString &parameter) const
                               "skip_target=%13 skip_import=%14")
             .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
             .arg(QStringLiteral(BA_CLICK_FX_KWIN_VERSION))
-            .arg(int(m_logLevel))
-            .arg(m_gpuReady)
-            .arg(isActive())
-            .arg(outputs.join(QLatin1Char(',')))
-            .arg(assetRoot)
-            .arg(shaderRoot)
-            .arg(m_gpu.diagnosticStatus())
-            .arg(m_skipNoActivity)
-            .arg(m_skipNoDamage)
-            .arg(m_skipGpu)
-            .arg(m_skipTarget)
-            .arg(m_skipImport);
+            .arg(int(m_logLevel)).arg(m_gpuReady).arg(isActive())
+            .arg(outputs.join(QLatin1Char(','))).arg(assetRoot).arg(shaderRoot)
+            .arg(m_gpu.diagnosticStatus()).arg(m_skipNoActivity).arg(m_skipNoDamage)
+            .arg(m_skipGpu).arg(m_skipTarget).arg(m_skipImport);
     }
     return status;
 }
 
+void BaClickFxEffect::applyPreview(const QJsonObject &obj)
+{
+            if (obj.contains(QStringLiteral("timeScale"))) {
+                m_timeScale = baclickfx::clamp(
+                    obj.value(QStringLiteral("timeScale")).toDouble(),
+                    baclickfx::defaults::kTimeScaleMin, baclickfx::defaults::kTimeScaleMax);
+            }
+            if (obj.contains(QStringLiteral("globalScale"))) {
+                m_globalScale = baclickfx::clamp(
+                    obj.value(QStringLiteral("globalScale")).toDouble(),
+                    baclickfx::defaults::kGlobalScaleMin,
+                    baclickfx::defaults::kGlobalScaleMax);
+            }
+            if (obj.contains(QStringLiteral("outputScaleEnabled"))) {
+                m_outputScaleEnabled = obj.value(QStringLiteral("outputScaleEnabled")).toBool();
+            }
+            if (obj.contains(QStringLiteral("outputScaleOverrides"))
+                && obj.value(QStringLiteral("outputScaleOverrides")).isObject()) {
+                m_outputScaleOverrides = obj.value(QStringLiteral("outputScaleOverrides")).toObject();
+            }
+            if (obj.contains(QStringLiteral("enableTrail"))) {
+                m_enableTrail = obj.value(QStringLiteral("enableTrail")).toBool();
+            }
+            if (obj.contains(QStringLiteral("alwaysTrail"))) {
+                m_alwaysTrail = obj.value(QStringLiteral("alwaysTrail")).toBool();
+            }
+            if (obj.contains(QStringLiteral("enableDistanceEmitter"))) {
+                m_enableDistanceEmitter = m_enableTrail
+                    && obj.value(QStringLiteral("enableDistanceEmitter")).toBool();
+            }
+            m_subsystemHeightPx = 0.0;
+            ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
+}
 void BaClickFxEffect::spawn(const QPointF &pos)
 {
     // 点击落在哪块屏，就按那块屏的高度换算世界单位。
-    ensureSubsystemsForHeight(outputHeightForPos(pos));
+    const double outputScale = outputScaleForPos(pos);
+    m_subsystems = baclickfx::buildSubsystemMap(m_timeScale, outputScale,
+                                                 outputHeightForPos(pos));
     ClickInstance inst = makeClickInstance(pos, m_subsystems, m_timeScale, m_rng);
     if (logsInstances()) {
         qCInfo(KWIN_BA_CLICK_FX) << "起实例" << pos << "时长" << inst.life
@@ -450,7 +516,7 @@ void BaClickFxEffect::advance(double dt)
     // 每次按下保存独立参数，使跨屏后的新拖动不改变已有拖尾寿命。
     for (TrailSession &session : m_trails) {
         session.stream.advance(
-            dt, baclickfx::clamp(session.trailParams.lifetimeSec / m_timeScale, 0.001, 60.0));
+            dt, baclickfx::clamp(session.trailParams.lifetimeSec / session.timeScale, 0.001, 60.0));
     }
     std::erase_if(m_trails, [](const TrailSession &session) {
         return !session.active && session.stream.empty();
@@ -477,6 +543,7 @@ void BaClickFxEffect::startDrag(const QPointF &pos)
     m_dragSerial++;
 
     TrailSession session;
+    session.timeScale = m_timeScale;
     session.trailParams = m_subsystems.trail;
     session.ring4Params = m_subsystems.ring4;
     session.active = true;

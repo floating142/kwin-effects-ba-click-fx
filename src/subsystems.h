@@ -92,8 +92,7 @@ struct Subsystem {
 
     // 派生参数，由 buildSubsystemMap() 统一填充。
     // 当前输出上一个 Unity 世界单位对应的逻辑像素数：
-    //   worldUnitPx = kUnitySizeToPx * (outputHeightPx / kReferenceHeightPx) * globalScale
-    //               = outputHeightPx / 2 * globalScale
+    //   worldUnitPx = outputHeightPx / (2 * kUnityOrthographicSize) * globalScale
     // 所有像素域参数、发射间距和包围盒计算均从该值派生。
     double worldUnitPx = 0.0;
     int lifetimeMs = 0;

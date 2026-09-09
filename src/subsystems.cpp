@@ -265,12 +265,11 @@ SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outp
         s.alphaKeys = ScalarCurve(kTrailAlphaKeys);
     }
 
-    // Unity 正交相机的垂直范围恒为 2 个世界单位（orthographicSize = 1.0），
-    // 所以 1 世界单位 = 输出逻辑高度的一半。kUnitySizeToPx(540) 是参考高度
-    // 1080 下的值，这里再乘 outputHeight/1080 归一化 —— 两者约掉后就是
-    // outputHeight/2，特效在 1080p / 1440p / 4K 上占屏比例完全一致。
+    // 参考 Unity 工程的正交相机 orthographicSize = 1.35，垂直视锥范围为
+    // 2 * kUnityOrthographicSize 个世界单位。因此世界到屏幕的投影比例为：
+    // outputHeight / (2 * orthographicSize)，再应用用户的整体尺寸缩放。
     const double height = outputHeightPx > 0.0 ? outputHeightPx : kReferenceHeightPx;
-    const double worldUnitPx = kUnitySizeToPx * (height / kReferenceHeightPx) * globalScale;
+    const double worldUnitPx = height / (2.0 * kUnityOrthographicSize) * globalScale;
 
     for (Subsystem *s : {&m.ring, &m.ring3, &m.ring4, &m.meshTri, &m.trail})
         finalize(*s, timeScale, globalScale, worldUnitPx);

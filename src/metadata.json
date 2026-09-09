@@ -2,10 +2,12 @@
     "KPlugin": {
         "Category": "Appearance",
         "Description": "A parameter-level port of the Blue Archive Unity click effect and cursor trail for KDE Plasma",
+        "Description[zh_TW]": "從蔚藍檔案 Unity 特效逐參數移植的 KDE Plasma 點擊特效與游標拖尾",
         "Description[zh_CN]": "从蔚蓝档案 Unity 特效逐参数移植的 KDE Plasma 点击特效与光标拖尾",
         "EnabledByDefault": false,
         "License": "GPL-3.0-or-later",
         "Name": "BA Click FX",
+        "Name[zh_TW]": "BA Click FX",
         "Name[zh_CN]": "BA Click FX",
         "Version": "1.0.3",
         "Authors": [

@@ -18,6 +18,7 @@
 #include <QLoggingCategory>
 #include <QHash>
 #include <QPointF>
+#include <QJsonObject>
 
 #include <chrono>
 #include <cstdint>
@@ -68,6 +69,7 @@ private Q_SLOTS:
 private:
     /// 读取 `[Effect-ba-click-fx]` 配置并重建运行时参数。
     void loadConfig();
+    void applyPreview(const QJsonObject &preview);
 
     /// 定位并加载 Cylinder002 OBJ 网格。
     void loadMeshes();
@@ -124,6 +126,7 @@ private:
      * 使用新输出尺度。
      */
     void ensureSubsystemsForHeight(double heightPx);
+    double outputScaleForPos(const QPointF &pos) const;
 
     /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
     int liveDistanceParticles(std::uint64_t dragSerial) const;
@@ -135,6 +138,8 @@ private:
     std::chrono::steady_clock::time_point m_lastAutoTrailMotion;
     double m_timeScale = 1.0;
     double m_globalScale = 1.0;
+    QJsonObject m_outputScaleOverrides;
+    bool m_outputScaleEnabled = baclickfx::defaults::kOutputScaleEnabledDefault;
     // 当前参数表对应的输出逻辑高度；0 表示尚未构建。
     double m_subsystemHeightPx = 0.0;
     // Ring4 粒子上限作用于单次按下；0 保留为未关联会话。
@@ -145,7 +150,7 @@ private:
     bool m_alwaysTrail = false;
     bool m_enableDistanceEmitter = true;
 
-    // 配置重建参数表时会先清空所有依赖旧参数的实例。
+    // 当前参数表仅供之后创建的实例使用；活动实例持有自己的参数快照。
     baclickfx::SubsystemMap m_subsystems;
     baclickfx::MeshProfiles m_meshes;
     baclickfx::Rng m_rng;
@@ -154,6 +159,7 @@ private:
     std::vector<TriBurstInstance> m_bursts;
     struct TrailSession {
         TrailStream stream;
+        double timeScale = 1.0;
         baclickfx::Subsystem trailParams;
         baclickfx::Subsystem ring4Params;
         std::vector<StrokeData> strokes;
