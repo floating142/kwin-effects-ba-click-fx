@@ -42,6 +42,9 @@ inline constexpr const char *kAlwaysTrail = "AlwaysTrail";
 /// 距离发射器开关的配置键。
 inline constexpr const char *kEnableDistanceEmitter = "EnableDistanceEmitter";
 
+/// 仅在桌面（壁纸层）上点击时触发特效的配置键。
+inline constexpr const char *kDesktopOnly = "DesktopOnly";
+
 /** @} */
 
 /**
@@ -91,6 +94,9 @@ inline constexpr bool kAlwaysTrailDefault = false;
 
 /// 默认启用距离发射器。
 inline constexpr bool kEnableDistanceEmitterDefault = true;
+
+/// 默认不限制点击来源，任意位置点击均触发特效。
+inline constexpr bool kDesktopOnlyDefault = true;
 
 /** @} */
 
