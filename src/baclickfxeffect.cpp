@@ -1460,10 +1460,25 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
             return;
         }
         if (!isDown && m_desktopOnly && !isDesktopAt(pos)) {
+            // 光标离开桌面区域（悬停在窗口/面板之上）：正常结束当前拖尾，
+            // 让已画出的部分自然淡出，而不是冻结内部锚点。如果这里只是
+            // 静默 return，m_lastDrag 会停在离开桌面前的最后位置；等光标
+            // 重新回到桌面时 updateDrag() 会把"冻结点"和"新位置"之间的
+            // 整段距离当成一帧内的正常移动来连线，画出一条突兀的长线段
+            // ——看起来就像特效一直在窗口下方跑，只是画不出来，一露面
+            // 就是一大截。真正结束会话可以避免这个问题。
+            if (m_dragging) {
+                endDrag();
+            }
             return;
         }
         if (!m_dragging) {
-            startDrag(oldPos);
+            // 从"离开桌面又重新进入"恢复时，锚点必须是当前光标位置本身
+            // （而不是 oldPos，那有可能仍停留在窗口范围内），否则会重新
+            // 引入同样的跳跃连线问题。对普通场景（未曾中断）而言，用
+            // pos 代替 oldPos 起笔只是少了一小段可忽略的起始位移，观感
+            // 上没有区别。
+            startDrag(pos);
             m_autoTrailSession = !isDown;
             effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
         }
