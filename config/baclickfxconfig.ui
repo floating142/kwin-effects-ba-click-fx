@@ -126,6 +126,14 @@
     </widget>
    </item>
 
+   <!-- 触发条件 -->
+   <item>
+    <widget class="QCheckBox" name="desktopOnlyCheckBox">
+     <property name="text"><string>Only trigger on desktop clicks</string></property>
+     <property name="toolTip"><string>Restrict the effect to clicks on the desktop background (wallpaper). Clicks on windows, panels, and other UI elements won't trigger it.</string></property>
+    </widget>
+   </item>
+
    <!-- 拖尾设置 -->
    <item>
     <widget class="QGroupBox" name="trailGroupBox">

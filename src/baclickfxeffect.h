@@ -131,6 +131,15 @@ private:
     /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
     int liveDistanceParticles(std::uint64_t dragSerial) const;
 
+    /**
+     * 判断 `pos` 处最上层可见窗口是否为桌面（壁纸）层。
+     *
+     * 用于 `m_desktopOnly` 开关：仅当点击落在桌面背景上时才触发特效，
+     * 落在任意普通窗口、面板或弹出层之上时返回 false。未命中任何窗口
+     * （例如坐标越界）时视为桌面，返回 true。
+     */
+    bool isDesktopAt(const QPointF &pos) const;
+
     baclickfx::defaults::LogLevel m_logLevel = baclickfx::defaults::kLogLevelDefault;
     bool m_debugDamage = false;
     bool m_dragging = false;
@@ -149,6 +158,9 @@ private:
     bool m_enableTrail = true;
     bool m_alwaysTrail = false;
     bool m_enableDistanceEmitter = true;
+    bool m_desktopOnly = baclickfx::defaults::kDesktopOnlyDefault;
+    // 当前这次按下手势是否因 m_desktopOnly 而被抑制；抑制状态持续到松开左键。
+    bool m_pressSuppressed = false;
 
     // 当前参数表仅供之后创建的实例使用；活动实例持有自己的参数快照。
     baclickfx::SubsystemMap m_subsystems;

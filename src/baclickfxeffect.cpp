@@ -269,6 +269,7 @@ void BaClickFxEffect::loadConfig()
     m_alwaysTrail = group.readEntry(def::kAlwaysTrail, def::kAlwaysTrailDefault);
     m_enableDistanceEmitter = m_enableTrail
         && group.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault);
+    m_desktopOnly = group.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault);
 
     // GPU timer 只在帧统计及以上级别启用。
     m_gpu.setLogLevel(m_logLevel);
@@ -527,6 +528,78 @@ bool BaClickFxEffect::trailEnabled() const
 {
     // Unity 侧 FxTrailTimeScale 在 timeScale 低于阈值时直接把拖尾停掉。
     return m_enableTrail && m_timeScale > m_subsystems.trail.killUnderTimeScale;
+}
+
+bool BaClickFxEffect::isDesktopAt(const QPointF &pos) const
+{
+    const QPoint p = pos.toPoint();
+    const auto stacking = effects->stackingOrder();
+    // stackingOrder() 按由下到上排列；从末尾开始即从最上层窗口开始查找。
+    for (auto it = stacking.crbegin(); it != stacking.crend(); ++it) {
+        EffectWindow *w = *it;
+        if (!w || !w->isOnCurrentDesktop() || w->isMinimized()) {
+            continue;
+        }
+        if (!w->frameGeometry().toRect().contains(p)) {
+            continue;
+        }
+
+        if (logsVerbose()) {
+            qCInfo(KWIN_BA_CLICK_FX)
+                << "isDesktopAt 命中窗口" << pos
+                << "class" << w->windowClass()
+                << "geom" << w->frameGeometry()
+                << "isDesktop" << w->isDesktop()
+                << "isDock" << w->isDock()
+                << "isPopupWindow" << w->isPopupWindow()
+                << "isDropdownMenu" << w->isDropdownMenu()
+                << "isPopupMenu" << w->isPopupMenu()
+                << "isTooltip" << w->isTooltip()
+                << "isComboBox" << w->isComboBox()
+                << "isNotification" << w->isNotification()
+                << "isCriticalNotification" << w->isCriticalNotification()
+                << "isOnScreenDisplay" << w->isOnScreenDisplay()
+                << "isAppletPopup" << w->isAppletPopup()
+                << "isUtility" << w->isUtility()
+                << "isSplash" << w->isSplash()
+                << "isDNDIcon" << w->isDNDIcon();
+        }
+
+        // 经典 X11 风格的 _NET_WM_WINDOW_TYPE_DESKTOP 判定，
+        // 部分后端/版本下对 layer-shell 背景层有效。
+        if (w->isDesktop()) {
+            return true;
+        }
+
+        // Plasma 在 Wayland 下把壁纸实现为 plasmashell 的 layer-shell
+        // 背景层，不一定满足上面的经典判定。这里改用角色排除法：
+        // 明确排除所有已知的非桌面 plasmashell 界面元素（面板、弹出
+        // 窗口、通知、OSD、下拉菜单、提示框等），剩下的 plasmashell
+        // 表面即视为桌面背景本身——不再依赖任意分辨率下的固定像素
+        // 尺寸阈值。
+        const bool isPlasmashellSurface =
+            w->windowClass().contains(QLatin1String("plasmashell"));
+        if (!isPlasmashellSurface) {
+            return false;
+        }
+        const bool isKnownNonDesktopRole =
+            w->isDock()               // 面板
+            || w->isPopupWindow()     // 任意自定位的弹出层（通用兜底）
+            || w->isDropdownMenu()
+            || w->isPopupMenu()
+            || w->isTooltip()
+            || w->isComboBox()
+            || w->isNotification()
+            || w->isCriticalNotification()
+            || w->isOnScreenDisplay() // 音量/亮度 OSD
+            || w->isAppletPopup()     // 挂件弹出面板（日历等）
+            || w->isUtility()
+            || w->isSplash()
+            || w->isDNDIcon();
+        return !isKnownNonDesktopRole;
+    }
+    // 没有任何窗口覆盖该坐标时，保守地当作桌面处理。
+    return true;
 }
 
 void BaClickFxEffect::startDrag(const QPointF &pos)
@@ -1344,6 +1417,12 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
     const bool isDown = buttons & Qt::LeftButton;
 
     if (!wasDown && isDown) {
+        // DesktopOnly 开启时，只有落在桌面（壁纸）层上的按下才启动手势；
+        // 落在任意窗口/面板上的按下整个手势期间都保持抑制，直到松开左键。
+        m_pressSuppressed = m_desktopOnly && !isDesktopAt(pos);
+        if (m_pressSuppressed) {
+            return;
+        }
         // AlwaysTrail 会话已经在鼠标移动时建立；左键按下只改变会话模式，
         // 不要结束并重新创建拖尾，否则一次点击或切换输入模式会产生断裂的新轨迹。
         if (!m_dragging) {
@@ -1358,6 +1437,11 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         // prePaintScreen() 加入 data.paint。
         effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
     } else if (wasDown && !isDown) {
+        const bool suppressed = m_pressSuppressed;
+        m_pressSuppressed = false;
+        if (suppressed) {
+            return;
+        }
         if (m_alwaysTrail && trailEnabled() && m_dragging) {
             // 释放左键后继续复用同一会话，切回自动拖尾模式。静止期间保留会话，
             // 下一次移动继续同一笔划，不产生断点或新的 TrailSession。
@@ -1370,6 +1454,14 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
             endDrag();
         }
     } else if (pos != oldPos && (isDown || (m_alwaysTrail && trailEnabled()))) {
+        // 按住左键拖动时，沿用按下瞬间的抑制状态，避免拖出桌面区域后特效突然出现；
+        // AlwaysTrail 的悬停轨迹（isDown 为 false）不受按下抑制状态影响，单独判定。
+        if (isDown && m_pressSuppressed) {
+            return;
+        }
+        if (!isDown && m_desktopOnly && !isDesktopAt(pos)) {
+            return;
+        }
         if (!m_dragging) {
             startDrag(oldPos);
             m_autoTrailSession = !isDown;
