@@ -543,18 +543,60 @@ bool BaClickFxEffect::isDesktopAt(const QPointF &pos) const
         if (!w->frameGeometry().toRect().contains(p)) {
             continue;
         }
-        // 经典 X11 风格的 _NET_WM_WINDOW_TYPE_DESKTOP 判定。
+
+        if (logsVerbose()) {
+            qCInfo(KWIN_BA_CLICK_FX)
+                << "isDesktopAt 命中窗口" << pos
+                << "class" << w->windowClass()
+                << "geom" << w->frameGeometry()
+                << "isDesktop" << w->isDesktop()
+                << "isDock" << w->isDock()
+                << "isPopupWindow" << w->isPopupWindow()
+                << "isDropdownMenu" << w->isDropdownMenu()
+                << "isPopupMenu" << w->isPopupMenu()
+                << "isTooltip" << w->isTooltip()
+                << "isComboBox" << w->isComboBox()
+                << "isNotification" << w->isNotification()
+                << "isCriticalNotification" << w->isCriticalNotification()
+                << "isOnScreenDisplay" << w->isOnScreenDisplay()
+                << "isAppletPopup" << w->isAppletPopup()
+                << "isUtility" << w->isUtility()
+                << "isSplash" << w->isSplash()
+                << "isDNDIcon" << w->isDNDIcon();
+        }
+
+        // 经典 X11 风格的 _NET_WM_WINDOW_TYPE_DESKTOP 判定，
+        // 部分后端/版本下对 layer-shell 背景层有效。
         if (w->isDesktop()) {
             return true;
         }
-        // Plasma 在 Wayland 下将桌面壁纸实现为 plasmashell 的
-        // layer-shell 背景层，不满足上面的判定；用 resourceClass +
-        // 尺寸做区分：面板是窄条，壁纸铺满整个输出。
-        const bool looksLikePlasmaBackground =
-            w->windowClass().contains(QLatin1String("plasmashell"))
-            && w->frameGeometry().width() > 800
-            && w->frameGeometry().height() > 600;
-        return looksLikePlasmaBackground;
+
+        // Plasma 在 Wayland 下把壁纸实现为 plasmashell 的 layer-shell
+        // 背景层，不一定满足上面的经典判定。这里改用角色排除法：
+        // 明确排除所有已知的非桌面 plasmashell 界面元素（面板、弹出
+        // 窗口、通知、OSD、下拉菜单、提示框等），剩下的 plasmashell
+        // 表面即视为桌面背景本身——不再依赖任意分辨率下的固定像素
+        // 尺寸阈值。
+        const bool isPlasmashellSurface =
+            w->windowClass().contains(QLatin1String("plasmashell"));
+        if (!isPlasmashellSurface) {
+            return false;
+        }
+        const bool isKnownNonDesktopRole =
+            w->isDock()               // 面板
+            || w->isPopupWindow()     // 任意自定位的弹出层（通用兜底）
+            || w->isDropdownMenu()
+            || w->isPopupMenu()
+            || w->isTooltip()
+            || w->isComboBox()
+            || w->isNotification()
+            || w->isCriticalNotification()
+            || w->isOnScreenDisplay() // 音量/亮度 OSD
+            || w->isAppletPopup()     // 挂件弹出面板（日历等）
+            || w->isUtility()
+            || w->isSplash()
+            || w->isDNDIcon();
+        return !isKnownNonDesktopRole;
     }
     // 没有任何窗口覆盖该坐标时，保守地当作桌面处理。
     return true;

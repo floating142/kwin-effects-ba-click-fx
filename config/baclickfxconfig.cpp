@@ -77,6 +77,8 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
                                      int(def::kGlobalScaleMax * kSliderScale));
 
     // 所有可编辑控件变化时由 KCModule 更新「应用」按钮状态。
+    connect(m_ui.desktopOnlyCheckBox, &QCheckBox::toggled,
+            this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.timeScaleSlider, &QSlider::valueChanged,
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.globalScaleSlider, &QSlider::valueChanged,
@@ -409,6 +411,9 @@ void BaClickFxEffectConfig::load()
     rebuildOutputScaleEditors();
     refreshOutputMetadata();
 
+    m_ui.desktopOnlyCheckBox->setChecked(
+        conf.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault));
+
     m_ui.enableTrailCheckBox->setChecked(
         conf.readEntry(def::kEnableTrail, def::kEnableTrailDefault));
     m_ui.alwaysTrailCheckBox->setChecked(
@@ -449,6 +454,8 @@ void BaClickFxEffectConfig::save()
     conf.writeEntry(def::kOutputScaleOverrides,
                     QJsonDocument(overrides).toJson(QJsonDocument::Compact));
     conf.writeEntry(def::kOutputScaleEnabled, m_ui.showOutputScaleCheckBox->isChecked());
+
+    conf.writeEntry(def::kDesktopOnly, m_ui.desktopOnlyCheckBox->isChecked());
 
     conf.writeEntry(def::kEnableTrail, m_ui.enableTrailCheckBox->isChecked());
     conf.writeEntry(def::kAlwaysTrail, m_ui.alwaysTrailCheckBox->isChecked());
@@ -567,6 +574,8 @@ void BaClickFxEffectConfig::defaults()
     }
     // Defaults must not destroy and recreate child widgets while KCModule is
     // processing its reset action. The persisted overrides are cleared on save.
+
+    m_ui.desktopOnlyCheckBox->setChecked(def::kDesktopOnlyDefault);
 
     m_ui.enableTrailCheckBox->setChecked(def::kEnableTrailDefault);
     m_ui.alwaysTrailCheckBox->setChecked(def::kAlwaysTrailDefault);

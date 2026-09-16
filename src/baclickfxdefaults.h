@@ -96,7 +96,7 @@ inline constexpr bool kAlwaysTrailDefault = false;
 inline constexpr bool kEnableDistanceEmitterDefault = true;
 
 /// 默认不限制点击来源，任意位置点击均触发特效。
-inline constexpr bool kDesktopOnlyDefault = true;
+inline constexpr bool kDesktopOnlyDefault = false;
 
 /** @} */
 
