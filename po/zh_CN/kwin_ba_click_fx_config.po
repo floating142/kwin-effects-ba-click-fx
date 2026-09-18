@@ -5,7 +5,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2026-09-07 00:00+0800\n"
+"PO-Revision-Date: 2026-09-18 00:00+0800\n"
 "Last-Translator: BA Click FX contributors\n"
 "Language-Team: Simplified Chinese\n"
 
@@ -107,3 +107,9 @@ msgstr "启用显示器独立缩放"
 
 msgid "Reset to 1.00"
 msgstr "恢复为 1.00"
+
+msgid "Only trigger on desktop clicks"
+msgstr "仅在点击桌面时触发"
+
+msgid "Restrict the effect to clicks on the desktop background (wallpaper). Clicks on windows, panels, and other UI elements won't trigger it."
+msgstr "仅当点击桌面背景（壁纸）时触发特效；点击窗口、面板或其他界面元素时不会触发。"

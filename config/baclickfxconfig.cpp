@@ -79,6 +79,8 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     // 所有可编辑控件变化时由 KCModule 更新「应用」按钮状态。
     connect(m_ui.desktopOnlyCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.desktopOnlyCheckBox, &QCheckBox::toggled,
+            this, [this] { sendPreview(); });
     connect(m_ui.timeScaleSlider, &QSlider::valueChanged,
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.globalScaleSlider, &QSlider::valueChanged,
@@ -495,6 +497,8 @@ void BaClickFxEffectConfig::dispatchPreview()
                                m_ui.timeScaleSlider->value() / double(kSliderScale)},
                               {QStringLiteral("globalScale"),
                                m_ui.globalScaleSlider->value() / double(kSliderScale)},
+                              {QStringLiteral("desktopOnly"),
+                               m_ui.desktopOnlyCheckBox->isChecked()},
                               {QStringLiteral("outputScaleEnabled"),
                                m_ui.showOutputScaleCheckBox->isChecked()}};
     QJsonObject outputOverrides;
@@ -523,6 +527,8 @@ void BaClickFxEffectConfig::restorePersistedPreview()
     QJsonObject preview{
         {QStringLiteral("timeScale"), conf.readEntry(def::kTimeScale, def::kTimeScaleDefault)},
         {QStringLiteral("globalScale"), conf.readEntry(def::kGlobalScale, def::kGlobalScaleDefault)},
+        {QStringLiteral("desktopOnly"),
+         conf.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault)},
         {QStringLiteral("outputScaleEnabled"),
          conf.readEntry(def::kOutputScaleEnabled, def::kOutputScaleEnabledDefault)},
         {QStringLiteral("enableTrail"), conf.readEntry(def::kEnableTrail, def::kEnableTrailDefault)},

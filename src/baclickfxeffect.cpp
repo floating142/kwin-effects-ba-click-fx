@@ -15,6 +15,8 @@
 #include <opengl/glshadermanager.h>
 // prePaintScreen() 使用 RenderView 的呈现时间戳，因此需要完整类型定义。
 #include <scene/scene.h>
+#include <window.h>
+#include <workspace.h>
 
 #include <KConfigGroup>
 #include <KSharedConfig>
@@ -445,37 +447,41 @@ QString BaClickFxEffect::debug(const QString &parameter) const
 
 void BaClickFxEffect::applyPreview(const QJsonObject &obj)
 {
-            if (obj.contains(QStringLiteral("timeScale"))) {
-                m_timeScale = baclickfx::clamp(
-                    obj.value(QStringLiteral("timeScale")).toDouble(),
-                    baclickfx::defaults::kTimeScaleMin, baclickfx::defaults::kTimeScaleMax);
-            }
-            if (obj.contains(QStringLiteral("globalScale"))) {
-                m_globalScale = baclickfx::clamp(
-                    obj.value(QStringLiteral("globalScale")).toDouble(),
-                    baclickfx::defaults::kGlobalScaleMin,
-                    baclickfx::defaults::kGlobalScaleMax);
-            }
-            if (obj.contains(QStringLiteral("outputScaleEnabled"))) {
-                m_outputScaleEnabled = obj.value(QStringLiteral("outputScaleEnabled")).toBool();
-            }
-            if (obj.contains(QStringLiteral("outputScaleOverrides"))
-                && obj.value(QStringLiteral("outputScaleOverrides")).isObject()) {
-                m_outputScaleOverrides = obj.value(QStringLiteral("outputScaleOverrides")).toObject();
-            }
-            if (obj.contains(QStringLiteral("enableTrail"))) {
-                m_enableTrail = obj.value(QStringLiteral("enableTrail")).toBool();
-            }
-            if (obj.contains(QStringLiteral("alwaysTrail"))) {
-                m_alwaysTrail = obj.value(QStringLiteral("alwaysTrail")).toBool();
-            }
-            if (obj.contains(QStringLiteral("enableDistanceEmitter"))) {
-                m_enableDistanceEmitter = m_enableTrail
-                    && obj.value(QStringLiteral("enableDistanceEmitter")).toBool();
-            }
-            m_subsystemHeightPx = 0.0;
-            ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
+    if (obj.contains(QStringLiteral("timeScale"))) {
+        m_timeScale = baclickfx::clamp(
+            obj.value(QStringLiteral("timeScale")).toDouble(),
+            baclickfx::defaults::kTimeScaleMin, baclickfx::defaults::kTimeScaleMax);
+    }
+    if (obj.contains(QStringLiteral("globalScale"))) {
+        m_globalScale = baclickfx::clamp(
+            obj.value(QStringLiteral("globalScale")).toDouble(),
+            baclickfx::defaults::kGlobalScaleMin,
+            baclickfx::defaults::kGlobalScaleMax);
+    }
+    if (obj.contains(QStringLiteral("desktopOnly"))) {
+        m_desktopOnly = obj.value(QStringLiteral("desktopOnly")).toBool();
+    }
+    if (obj.contains(QStringLiteral("outputScaleEnabled"))) {
+        m_outputScaleEnabled = obj.value(QStringLiteral("outputScaleEnabled")).toBool();
+    }
+    if (obj.contains(QStringLiteral("outputScaleOverrides"))
+        && obj.value(QStringLiteral("outputScaleOverrides")).isObject()) {
+        m_outputScaleOverrides = obj.value(QStringLiteral("outputScaleOverrides")).toObject();
+    }
+    if (obj.contains(QStringLiteral("enableTrail"))) {
+        m_enableTrail = obj.value(QStringLiteral("enableTrail")).toBool();
+    }
+    if (obj.contains(QStringLiteral("alwaysTrail"))) {
+        m_alwaysTrail = obj.value(QStringLiteral("alwaysTrail")).toBool();
+    }
+    if (obj.contains(QStringLiteral("enableDistanceEmitter"))) {
+        m_enableDistanceEmitter = m_enableTrail
+            && obj.value(QStringLiteral("enableDistanceEmitter")).toBool();
+    }
+    m_subsystemHeightPx = 0.0;
+    ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
 }
+
 void BaClickFxEffect::spawn(const QPointF &pos)
 {
     // 点击落在哪块屏，就按那块屏的高度换算世界单位。
@@ -532,73 +538,51 @@ bool BaClickFxEffect::trailEnabled() const
 
 bool BaClickFxEffect::isDesktopAt(const QPointF &pos) const
 {
-    const QPoint p = pos.toPoint();
-    const auto stacking = effects->stackingOrder();
-    // stackingOrder() 按由下到上排列；从末尾开始即从最上层窗口开始查找。
+    bool onOutput = false;
+    for (const LogicalOutput *output : effects->screens()) {
+        if (output && output->geometry().contains(pos.toPoint())) {
+            onOutput = true;
+            break;
+        }
+    }
+    if (!onOutput) {
+        return false;
+    }
+
+    // EffectWindow 没有公开的坐标命中接口。本插件本就与 KWin 版本绑定，
+    // 因此直接使用 KWin 输入分发的 Window::hitTest()，以正确处理 Wayland
+    // input region、子表面和窗口装饰。
+    const QList<Window *> &stacking = Workspace::self()->stackingOrder();
     for (auto it = stacking.crbegin(); it != stacking.crend(); ++it) {
-        EffectWindow *w = *it;
-        if (!w || !w->isOnCurrentDesktop() || w->isMinimized()) {
+        Window *window = *it;
+        if (!window || window->isDeleted()
+            || !window->isOnCurrentActivity()
+            || !window->isOnCurrentDesktop()
+            || window->isMinimized()
+            || window->isHidden()
+            || window->isHiddenByShowDesktop()
+            || !window->readyForPainting()) {
             continue;
         }
-        if (!w->frameGeometry().toRect().contains(p)) {
+        if (!window->hitTest(pos)) {
             continue;
         }
 
         if (logsVerbose()) {
             qCInfo(KWIN_BA_CLICK_FX)
-                << "isDesktopAt 命中窗口" << pos
-                << "class" << w->windowClass()
-                << "geom" << w->frameGeometry()
-                << "isDesktop" << w->isDesktop()
-                << "isDock" << w->isDock()
-                << "isPopupWindow" << w->isPopupWindow()
-                << "isDropdownMenu" << w->isDropdownMenu()
-                << "isPopupMenu" << w->isPopupMenu()
-                << "isTooltip" << w->isTooltip()
-                << "isComboBox" << w->isComboBox()
-                << "isNotification" << w->isNotification()
-                << "isCriticalNotification" << w->isCriticalNotification()
-                << "isOnScreenDisplay" << w->isOnScreenDisplay()
-                << "isAppletPopup" << w->isAppletPopup()
-                << "isUtility" << w->isUtility()
-                << "isSplash" << w->isSplash()
-                << "isDNDIcon" << w->isDNDIcon();
+                << "desktop hit test" << pos
+                << "class" << window->resourceClass()
+                << "geometry" << window->frameGeometry()
+                << "type" << window->windowType()
+                << "layer" << window->layer();
         }
 
-        // 经典 X11 风格的 _NET_WM_WINDOW_TYPE_DESKTOP 判定，
-        // 部分后端/版本下对 layer-shell 背景层有效。
-        if (w->isDesktop()) {
-            return true;
-        }
-
-        // Plasma 在 Wayland 下把壁纸实现为 plasmashell 的 layer-shell
-        // 背景层，不一定满足上面的经典判定。这里改用角色排除法：
-        // 明确排除所有已知的非桌面 plasmashell 界面元素（面板、弹出
-        // 窗口、通知、OSD、下拉菜单、提示框等），剩下的 plasmashell
-        // 表面即视为桌面背景本身——不再依赖任意分辨率下的固定像素
-        // 尺寸阈值。
-        const bool isPlasmashellSurface =
-            w->windowClass().contains(QLatin1String("plasmashell"));
-        if (!isPlasmashellSurface) {
-            return false;
-        }
-        const bool isKnownNonDesktopRole =
-            w->isDock()               // 面板
-            || w->isPopupWindow()     // 任意自定位的弹出层（通用兜底）
-            || w->isDropdownMenu()
-            || w->isPopupMenu()
-            || w->isTooltip()
-            || w->isComboBox()
-            || w->isNotification()
-            || w->isCriticalNotification()
-            || w->isOnScreenDisplay() // 音量/亮度 OSD
-            || w->isAppletPopup()     // 挂件弹出面板（日历等）
-            || w->isUtility()
-            || w->isSplash()
-            || w->isDNDIcon();
-        return !isKnownNonDesktopRole;
+        // X11 桌面窗口具有 Desktop 类型；Wayland layer-shell 背景层由
+        // KWin 放入 DesktopLayer。其他 shell 表面一律不做桌面推断。
+        return window->isDesktop() || window->layer() == DesktopLayer;
     }
-    // 没有任何窗口覆盖该坐标时，保守地当作桌面处理。
+
+    // 坐标在输出上且没有可接收输入的表面，露出的就是桌面。
     return true;
 }
 
@@ -1406,8 +1390,8 @@ void BaClickFxEffect::postPaintScreen()
 }
 
 void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos,
-                                     Qt::MouseButtons buttons, Qt::MouseButtons oldButtons,
-                                     Qt::KeyboardModifiers, Qt::KeyboardModifiers)
+                                       Qt::MouseButtons buttons, Qt::MouseButtons oldButtons,
+                                       Qt::KeyboardModifiers, Qt::KeyboardModifiers)
 {
     ++m_mouseChangedEvents;
     if (pos != oldPos) {
@@ -1460,25 +1444,17 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
             return;
         }
         if (!isDown && m_desktopOnly && !isDesktopAt(pos)) {
-            // 光标离开桌面区域（悬停在窗口/面板之上）：正常结束当前拖尾，
-            // 让已画出的部分自然淡出，而不是冻结内部锚点。如果这里只是
-            // 静默 return，m_lastDrag 会停在离开桌面前的最后位置；等光标
-            // 重新回到桌面时 updateDrag() 会把"冻结点"和"新位置"之间的
-            // 整段距离当成一帧内的正常移动来连线，画出一条突兀的长线段
-            // ——看起来就像特效一直在窗口下方跑，只是画不出来，一露面
-            // 就是一大截。真正结束会话可以避免这个问题。
+            // 结束而不是暂停会话，避免回到桌面时连接一条跨窗口的长线。
             if (m_dragging) {
                 endDrag();
             }
             return;
         }
         if (!m_dragging) {
-            // 从"离开桌面又重新进入"恢复时，锚点必须是当前光标位置本身
-            // （而不是 oldPos，那有可能仍停留在窗口范围内），否则会重新
-            // 引入同样的跳跃连线问题。对普通场景（未曾中断）而言，用
-            // pos 代替 oldPos 起笔只是少了一小段可忽略的起始位移，观感
-            // 上没有区别。
-            startDrag(pos);
+            // 从非桌面区域进入桌面时从当前位置起笔，避免跨过窗口连线。
+            // 普通起笔仍保留 oldPos 到 pos 的首段移动。
+            const QPointF start = m_desktopOnly && !isDesktopAt(oldPos) ? pos : oldPos;
+            startDrag(start);
             m_autoTrailSession = !isDown;
             effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
         }
