@@ -50,7 +50,7 @@ ProcessIdentity processIdentityFromData(const QByteArray &commandLine,
 ProcessIdentity processIdentity(qint64 pid);
 
 /**
- * 选择单一权威身份，优先级为 desktop file、启动器 ID、进程、窗口类。
+ * 选择单一权威身份，优先级为 desktop file、启动器 ID + 进程组件、进程、窗口类。
  *
  * 规则只保存返回的这一层身份，低优先级字段不会参与后续匹配。
  */

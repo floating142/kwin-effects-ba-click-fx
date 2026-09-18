@@ -294,6 +294,9 @@ void LogicTests::applicationFilterNormalizesAndRoundTrips()
     // 旧的多字段对象没有 kind/value，必须直接忽略而不是隐式迁移。
     const QByteArray oldFormat = R"([{"desktopFile":"org.kde.kate","resourceClass":"kate"}])";
     QVERIFY(baclickfx::parseExcludedApplications(oldFormat).isEmpty());
+    const QByteArray broadLauncher =
+        R"([{"kind":"launcher","value":"lutris:game-one"}])";
+    QVERIFY(baclickfx::parseExcludedApplications(broadLauncher).isEmpty());
 }
 
 void LogicTests::applicationIdentityUsesPriority()
@@ -313,6 +316,15 @@ void LogicTests::applicationIdentityUsesPriority()
         lutrisProcess);
     QCOMPARE(launcher.kind, baclickfx::ApplicationIdentityKind::Launcher);
     QCOMPARE(launcher.value, QStringLiteral("lutris:game-one"));
+    QCOMPARE(launcher.qualifier, QStringLiteral("game-one.exe"));
+
+    baclickfx::ProcessIdentity launcherProcess = lutrisProcess;
+    launcherProcess.command = QStringLiteral("c:/launcher/games.exe");
+    const auto gameLauncher = baclickfx::identifyApplication(
+        {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"),
+        launcherProcess);
+    QCOMPARE(gameLauncher.value, launcher.value);
+    QCOMPARE(gameLauncher.qualifier, QStringLiteral("games.exe"));
 
     baclickfx::ProcessIdentity plainProcess = lutrisProcess;
     plainProcess.launcherId.clear();
@@ -331,6 +343,7 @@ void LogicTests::applicationIdentityUsesPriority()
 
     const QVector<baclickfx::ExcludedApplication> rules{{launcher, QStringLiteral("Game")}};
     QVERIFY(baclickfx::isApplicationExcluded(rules, launcher));
+    QVERIFY(!baclickfx::isApplicationExcluded(rules, gameLauncher));
     QVERIFY(!baclickfx::isApplicationExcluded(rules, process));
 }
 

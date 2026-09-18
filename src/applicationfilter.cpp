@@ -23,6 +23,11 @@ QString normalizeProcessCommand(QString value)
     return value.toCaseFolded();
 }
 
+QString processComponent(const QString &command)
+{
+    return normalizeProcessCommand(command).section(u'/', -1);
+}
+
 QString normalizeWinePrefix(const QString &value)
 {
     const QString trimmed = value.trimmed();
@@ -85,7 +90,7 @@ ApplicationIdentity normalizeIdentity(ApplicationIdentity identity)
         break;
     case ApplicationIdentityKind::Launcher:
         identity.value = identity.value.trimmed().toCaseFolded();
-        identity.qualifier.clear();
+        identity.qualifier = processComponent(identity.qualifier);
         break;
     case ApplicationIdentityKind::Process:
         identity.value = normalizeProcessCommand(identity.value);
@@ -111,7 +116,12 @@ ApplicationIdentity normalizeIdentity(ApplicationIdentity identity)
 
 bool ApplicationIdentity::isValid() const
 {
-    return kind != ApplicationIdentityKind::Invalid && !value.isEmpty();
+    if (kind == ApplicationIdentityKind::Invalid || value.isEmpty()) {
+        return false;
+    }
+    // 一个启动器游戏可能同时拥有启动器窗口和游戏窗口；可执行文件组件
+    // 是区分它们所需的稳定最小粒度。
+    return kind != ApplicationIdentityKind::Launcher || !qualifier.isEmpty();
 }
 
 QString normalizeApplicationId(const QString &value)
@@ -183,9 +193,9 @@ ApplicationIdentity identifyApplication(const QString &desktopFile,
     if (!normalizedDesktopFile.isEmpty()) {
         return {ApplicationIdentityKind::DesktopFile, normalizedDesktopFile, {}};
     }
-    if (!process.launcherId.isEmpty()) {
+    if (!process.launcherId.isEmpty() && !process.command.isEmpty()) {
         return normalizeIdentity({ApplicationIdentityKind::Launcher,
-                                  process.launcherId, {}});
+                                  process.launcherId, process.command});
     }
     if (!process.command.isEmpty()) {
         return normalizeIdentity({ApplicationIdentityKind::Process,

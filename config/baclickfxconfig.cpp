@@ -69,13 +69,16 @@ QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
     case baclickfx::ApplicationIdentityKind::Launcher: {
         const QString provider = identity.value.section(u':', 0, 0);
         const QString id = identity.value.section(u':', 1);
+        const QString component = identity.qualifier;
         if (provider == QLatin1String("lutris")) {
-            return i18n("Lutris · %1", shortenedId(id));
+            return i18n("Lutris · %1", QStringLiteral("%1 · %2")
+                        .arg(shortenedId(id), component));
         }
         if (provider == QLatin1String("steam")) {
-            return i18n("Steam · %1", id);
+            return i18n("Steam · %1", QStringLiteral("%1 · %2").arg(id, component));
         }
-        return i18n("Launcher · %1", shortenedId(identity.value));
+        return i18n("Launcher · %1", QStringLiteral("%1 · %2")
+                    .arg(shortenedId(identity.value), component));
     }
     case baclickfx::ApplicationIdentityKind::Process:
         return i18n("Process · %1", identity.value.section(u'/', -1));
@@ -96,8 +99,9 @@ QString applicationIdentityDetails(const baclickfx::ExcludedApplication &applica
     const baclickfx::ApplicationIdentity &identity = application.identity;
     switch (identity.kind) {
     case baclickfx::ApplicationIdentityKind::DesktopFile:
-    case baclickfx::ApplicationIdentityKind::Launcher:
         return identity.value;
+    case baclickfx::ApplicationIdentityKind::Launcher:
+        return QStringLiteral("%1\n%2").arg(identity.value, identity.qualifier);
     case baclickfx::ApplicationIdentityKind::Process:
         return identity.qualifier.isEmpty()
             ? identity.value
