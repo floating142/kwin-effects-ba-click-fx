@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "baclickfxeffect.h"
+#include "applicationfilter.h"
 #include "baclickfxdefaults.h"
 #include "diagnostics.h"
 #include "damageutils.h"
@@ -272,6 +273,10 @@ void BaClickFxEffect::loadConfig()
     m_enableDistanceEmitter = m_enableTrail
         && group.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault);
     m_desktopOnly = group.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault);
+    m_excludeApplications = group.readEntry(def::kExcludeApplications,
+                                             def::kExcludeApplicationsDefault);
+    m_excludedApplications = baclickfx::parseExcludedApplications(
+        group.readEntry(def::kExcludedApplications, QByteArray()));
 
     // GPU timer 只在帧统计及以上级别启用。
     m_gpu.setLogLevel(m_logLevel);
@@ -390,12 +395,17 @@ QString BaClickFxEffect::debug(const QString &parameter) const
         }
         return QStringLiteral("preview-applied");
     }
-    const QString status = QStringLiteral("build=%1 logLevel=%2 debugDamage=%3 gpuReady=%4 active=%5")
+    const QString status = QStringLiteral(
+        "build=%1 logLevel=%2 debugDamage=%3 gpuReady=%4 active=%5 "
+        "desktopOnly=%6 excludeApplications=%7 excludedApplicationCount=%8")
         .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
         .arg(int(m_logLevel))
         .arg(m_debugDamage)
         .arg(m_gpuReady)
-        .arg(isActive());
+        .arg(isActive())
+        .arg(m_desktopOnly)
+        .arg(m_excludeApplications)
+        .arg(m_excludedApplications.size());
     if (parameter.compare(QStringLiteral("log"), Qt::CaseInsensitive) == 0
         && logsInstances()) {
         qCInfo(KWIN_BA_CLICK_FX) << "日志测试" << status;
@@ -434,13 +444,15 @@ QString BaClickFxEffect::debug(const QString &parameter) const
                               "log_level=%3 gpu_ready=%4 active=%5 outputs=\"%6\" "
                               "asset_root=\"%7\" shader_root=\"%8\" %9 "
                               "skip_no_activity=%10 skip_no_damage=%11 skip_gpu=%12 "
-                              "skip_target=%13 skip_import=%14")
+                              "skip_target=%13 skip_import=%14 desktop_only=%15 "
+                              "exclude_applications=%16 excluded_application_count=%17")
             .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
             .arg(QStringLiteral(BA_CLICK_FX_KWIN_VERSION))
             .arg(int(m_logLevel)).arg(m_gpuReady).arg(isActive())
             .arg(outputs.join(QLatin1Char(','))).arg(assetRoot).arg(shaderRoot)
             .arg(m_gpu.diagnosticStatus()).arg(m_skipNoActivity).arg(m_skipNoDamage)
-            .arg(m_skipGpu).arg(m_skipTarget).arg(m_skipImport);
+            .arg(m_skipGpu).arg(m_skipTarget).arg(m_skipImport)
+            .arg(m_desktopOnly).arg(m_excludeApplications).arg(m_excludedApplications.size());
     }
     return status;
 }
@@ -460,6 +472,14 @@ void BaClickFxEffect::applyPreview(const QJsonObject &obj)
     }
     if (obj.contains(QStringLiteral("desktopOnly"))) {
         m_desktopOnly = obj.value(QStringLiteral("desktopOnly")).toBool();
+    }
+    if (obj.contains(QStringLiteral("excludeApplications"))) {
+        m_excludeApplications = obj.value(QStringLiteral("excludeApplications")).toBool();
+    }
+    if (obj.contains(QStringLiteral("excludedApplications"))
+        && obj.value(QStringLiteral("excludedApplications")).isArray()) {
+        m_excludedApplications = baclickfx::excludedApplicationsFromJson(
+            obj.value(QStringLiteral("excludedApplications")).toArray());
     }
     if (obj.contains(QStringLiteral("outputScaleEnabled"))) {
         m_outputScaleEnabled = obj.value(QStringLiteral("outputScaleEnabled")).toBool();
@@ -536,19 +556,8 @@ bool BaClickFxEffect::trailEnabled() const
     return m_enableTrail && m_timeScale > m_subsystems.trail.killUnderTimeScale;
 }
 
-bool BaClickFxEffect::isDesktopAt(const QPointF &pos) const
+Window *BaClickFxEffect::inputWindowAt(const QPointF &pos) const
 {
-    bool onOutput = false;
-    for (const LogicalOutput *output : effects->screens()) {
-        if (output && output->geometry().contains(pos.toPoint())) {
-            onOutput = true;
-            break;
-        }
-    }
-    if (!onOutput) {
-        return false;
-    }
-
     // EffectWindow 没有公开的坐标命中接口。本插件本就与 KWin 版本绑定，
     // 因此直接使用 KWin 输入分发的 Window::hitTest()，以正确处理 Wayland
     // input region、子表面和窗口装饰。
@@ -570,19 +579,62 @@ bool BaClickFxEffect::isDesktopAt(const QPointF &pos) const
 
         if (logsVerbose()) {
             qCInfo(KWIN_BA_CLICK_FX)
-                << "desktop hit test" << pos
+                << "input hit test" << pos
                 << "class" << window->resourceClass()
                 << "geometry" << window->frameGeometry()
                 << "type" << window->windowType()
                 << "layer" << window->layer();
         }
+        return window;
+    }
+    return nullptr;
+}
 
-        // X11 桌面窗口具有 Desktop 类型；Wayland layer-shell 背景层由
-        // KWin 放入 DesktopLayer。其他 shell 表面一律不做桌面推断。
-        return window->isDesktop() || window->layer() == DesktopLayer;
+bool BaClickFxEffect::isWindowExcluded(const Window *window) const
+{
+    // 对话框和弹出窗口通常继承主窗口的应用身份。深度上限防御
+    // 异常 transient 链环，正常窗口只需要一两次迭代。
+    int depth = 0;
+    for (const Window *candidate = window;
+         candidate && depth < 16;
+         candidate = candidate->transientFor(), ++depth) {
+        if (baclickfx::isApplicationExcluded(
+                m_excludedApplications,
+                candidate->desktopFileName(), candidate->resourceClass())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos) const
+{
+    if (!m_desktopOnly && !m_excludeApplications) {
+        return true;
     }
 
-    // 坐标在输出上且没有可接收输入的表面，露出的就是桌面。
+    bool onOutput = false;
+    for (const LogicalOutput *output : effects->screens()) {
+        if (output && output->geometry().contains(pos.toPoint())) {
+            onOutput = true;
+            break;
+        }
+    }
+
+    Window *window = inputWindowAt(pos);
+    // X11 桌面窗口具有 Desktop 类型；Wayland layer-shell 背景层由
+    // KWin 放入 DesktopLayer。无窗口的输出区域同样是露出的桌面。
+    const bool desktop = onOutput
+        && (!window || window->isDesktop() || window->layer() == DesktopLayer);
+
+    if (m_desktopOnly && !desktop) {
+        return false;
+    }
+    // 应用排除不覆盖真实桌面，避免排除 plasmashell 后连壁纸也失效。
+    if (m_excludeApplications && window && !desktop && isWindowExcluded(window)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -1401,10 +1453,14 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
     const bool isDown = buttons & Qt::LeftButton;
 
     if (!wasDown && isDown) {
-        // DesktopOnly 开启时，只有落在桌面（壁纸）层上的按下才启动手势；
-        // 落在任意窗口/面板上的按下整个手势期间都保持抑制，直到松开左键。
-        m_pressSuppressed = m_desktopOnly && !isDesktopAt(pos);
+        // 按下时决定整次手势是否触发；后续拖动不因跨越窗口而突然改变状态。
+        m_pressSuppressed = !isEffectAllowedAt(pos);
         if (m_pressSuppressed) {
+            // 配置变更或窗口在光标下出现时，可能仍留有 AlwaysTrail 会话。
+            // 结束它可确保后续 pointerMotion 不会绕过本次按下的过滤结果。
+            if (m_dragging) {
+                endDrag();
+            }
             return;
         }
         // AlwaysTrail 会话已经在鼠标移动时建立；左键按下只改变会话模式，
@@ -1443,7 +1499,7 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         if (isDown && m_pressSuppressed) {
             return;
         }
-        if (!isDown && m_desktopOnly && !isDesktopAt(pos)) {
+        if (!isDown && !isEffectAllowedAt(pos)) {
             // 结束而不是暂停会话，避免回到桌面时连接一条跨窗口的长线。
             if (m_dragging) {
                 endDrag();
@@ -1453,7 +1509,7 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         if (!m_dragging) {
             // 从非桌面区域进入桌面时从当前位置起笔，避免跨过窗口连线。
             // 普通起笔仍保留 oldPos 到 pos 的首段移动。
-            const QPointF start = m_desktopOnly && !isDesktopAt(oldPos) ? pos : oldPos;
+            const QPointF start = !isEffectAllowedAt(oldPos) ? pos : oldPos;
             startDrag(start);
             m_autoTrailSession = !isDown;
             effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));

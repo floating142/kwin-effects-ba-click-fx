@@ -70,7 +70,7 @@ JOBS=4 ./install-local.sh --system
 ./install-local.sh --help
 ```
 
-The configuration page provides time scaling, overall scaling, per-display scaling, trail controls, debug logging and repaint-region borders. Unity-authored colors, particle counts, trail width, emission spacing and Bloom parameters remain fixed.
+The configuration page provides time scaling, overall scaling, per-display scaling, desktop-only triggering, application exclusions, trail controls, debug logging and repaint-region borders. To exclude an application, enable **Exclude specified applications**, click **Pick window…**, then select one of its windows; KWin supplies the application identity and the page asks for confirmation before adding it. Unity-authored colors, particle counts, trail width, emission spacing and Bloom parameters remain fixed.
 
 Remove a system installation with `./uninstall-local.sh --system`; use `--user` for a user installation. Add `--purge-config` to remove saved settings and the enabled state.
 

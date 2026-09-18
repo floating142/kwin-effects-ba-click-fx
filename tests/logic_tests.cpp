@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "applicationfilter.h"
 #include "curveutils.h"
 #include "clickinstance.h"
 #include "bloomutils.h"
@@ -42,6 +43,8 @@ private Q_SLOTS:
     void outputScaleUsesUnityOrthographicProjection();
     void outputScaleIdIsStable();
     void outputUuidIsPreferred();
+    void applicationFilterNormalizesAndRoundTrips();
+    void applicationFilterPrefersDesktopFile();
 };
 
 void LogicTests::scalarCurveClampsAndInterpolates()
@@ -263,6 +266,44 @@ void LogicTests::outputUuidIsPreferred()
     QCOMPARE(baclickfx::preferredOutputScaleId({}, QStringLiteral("V"), QStringLiteral("M"),
                                                 QStringLiteral("S"), QStringLiteral("DP-1")),
              QStringLiteral("V|M|S|DP-1"));
+}
+
+void LogicTests::applicationFilterNormalizesAndRoundTrips()
+{
+    const QVector<baclickfx::ExcludedApplication> source{{
+        .desktopFile = QStringLiteral(" Org.KDE.Kate.desktop "),
+        .resourceClass = QStringLiteral(" KATE "),
+        .displayName = QStringLiteral("Kate"),
+    }};
+    const QByteArray json = baclickfx::serializeExcludedApplications(source);
+    const auto parsed = baclickfx::parseExcludedApplications(json);
+    QCOMPARE(parsed.size(), 1);
+    QCOMPARE(parsed.front().desktopFile, QStringLiteral("org.kde.kate"));
+    QCOMPARE(parsed.front().resourceClass, QStringLiteral("kate"));
+    QCOMPARE(parsed.front().displayName, QStringLiteral("Kate"));
+}
+
+void LogicTests::applicationFilterPrefersDesktopFile()
+{
+    const baclickfx::ExcludedApplication rule{
+        .desktopFile = QStringLiteral("org.kde.kate"),
+        .resourceClass = QStringLiteral("kate"),
+        .displayName = {},
+    };
+    QVERIFY(baclickfx::matchesExcludedApplication(
+        rule, QStringLiteral("org.kde.kate.desktop"), QStringLiteral("other")));
+    QVERIFY(!baclickfx::matchesExcludedApplication(
+        rule, QStringLiteral("org.example.other"), QStringLiteral("kate")));
+    QVERIFY(baclickfx::matchesExcludedApplication(
+        rule, QString(), QStringLiteral("KATE")));
+
+    const baclickfx::ExcludedApplication classOnlyRule{
+        .desktopFile = {},
+        .resourceClass = QStringLiteral("wine-game"),
+        .displayName = {},
+    };
+    QVERIFY(baclickfx::matchesExcludedApplication(
+        classOnlyRule, QStringLiteral("unregistered.desktop"), QStringLiteral("WINE-GAME")));
 }
 
 QTEST_APPLESS_MAIN(LogicTests)

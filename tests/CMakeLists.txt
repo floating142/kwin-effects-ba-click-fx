@@ -2,6 +2,7 @@
 
 add_executable(ba_click_fx_logic_tests
     logic_tests.cpp
+    ${CMAKE_SOURCE_DIR}/src/applicationfilter.cpp
     ${CMAKE_SOURCE_DIR}/src/curveutils.cpp
     ${CMAKE_SOURCE_DIR}/src/trailstream.cpp
     ${CMAKE_SOURCE_DIR}/src/clickinstance.cpp

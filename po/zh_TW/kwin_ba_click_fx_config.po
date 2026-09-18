@@ -113,3 +113,54 @@ msgstr "僅在點擊桌面時觸發"
 
 msgid "Restrict the effect to clicks on the desktop background (wallpaper). Clicks on windows, panels, and other UI elements won't trigger it."
 msgstr "僅當點擊桌面背景（桌布）時觸發效果；點擊視窗、面板或其他介面元素時不會觸發。"
+
+msgid "Exclude specified applications"
+msgstr "排除指定應用程式"
+
+msgid "Do not trigger the effect when clicking applications in the exclusion list"
+msgstr "點擊排除清單中的應用程式時不觸發效果"
+
+msgid "Excluded applications"
+msgstr "已排除的應用程式"
+
+msgid "Pick a window to exclude every window belonging to the same application."
+msgstr "選取一個視窗，排除屬於同一應用程式的所有視窗。"
+
+msgid "Application"
+msgstr "應用程式"
+
+msgid "Identifier"
+msgstr "識別碼"
+
+msgid "Pick window…"
+msgstr "選取視窗…"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Click a window…"
+msgstr "請點擊視窗…"
+
+msgid "Window selection failed"
+msgstr "視窗選取失敗"
+
+msgid "Application cannot be identified"
+msgstr "無法識別應用程式"
+
+msgid "The selected window does not provide a stable application identifier."
+msgstr "所選視窗未提供穩定的應用程式識別碼。"
+
+msgid "Application already excluded"
+msgstr "應用程式已被排除"
+
+msgid "This application is already in the exclusion list."
+msgstr "此應用程式已在排除清單中。"
+
+msgid "Exclude all windows belonging to %1?\n\nApplication identifier: %2"
+msgstr "要排除屬於 %1 的所有視窗嗎？\n\n應用程式識別碼：%2"
+
+msgid "Exclude application"
+msgstr "排除應用程式"
+
+msgid "Exclude"
+msgstr "排除"

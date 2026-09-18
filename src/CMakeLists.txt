@@ -26,6 +26,7 @@ set_property(TARGET kwin4_effect_ba_click_fx PROPERTY AUTOMOC_MACRO_NAMES
 
 target_sources(kwin4_effect_ba_click_fx PRIVATE
     baclickfxeffect.cpp
+    applicationfilter.cpp
     gpurenderer.cpp
     clickinstance.cpp
     trailstream.cpp
