@@ -51,6 +51,21 @@ namespace
 // QSlider 仅保存整数，因此小数配置统一缩放 100 倍。
 constexpr int kSliderScale = 100;
 
+QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
+{
+    QStringList parts;
+    if (!application.desktopFile.isEmpty()) {
+        parts.append(QStringLiteral("desktop=%1").arg(application.desktopFile));
+    }
+    if (!application.resourceClass.isEmpty()) {
+        parts.append(QStringLiteral("class=%1").arg(application.resourceClass));
+    }
+    if (!application.resourceName.isEmpty()) {
+        parts.append(QStringLiteral("instance=%1").arg(application.resourceName));
+    }
+    return parts.join(QStringLiteral(" · "));
+}
+
 }
 
 K_PLUGIN_CLASS(BaClickFxEffectConfig)
@@ -285,9 +300,7 @@ void BaClickFxEffectConfig::rebuildExcludedApplications()
     tree->clear();
     for (int index = 0; index < m_excludedApplications.size(); ++index) {
         const baclickfx::ExcludedApplication &application = m_excludedApplications.at(index);
-        const QString identifier = !application.desktopFile.isEmpty()
-            ? application.desktopFile
-            : application.resourceClass;
+        const QString identifier = applicationIdentifier(application);
         const QString displayName = !application.displayName.isEmpty()
             ? application.displayName
             : identifier;
@@ -342,9 +355,12 @@ void BaClickFxEffectConfig::pickExcludedApplication()
                 info.value(QStringLiteral("desktopFile")).toString()),
             .resourceClass = baclickfx::normalizeApplicationId(
                 info.value(QStringLiteral("resourceClass")).toString()),
+            .resourceName = baclickfx::normalizeApplicationId(
+                info.value(QStringLiteral("resourceName")).toString()),
             .displayName = info.value(QStringLiteral("caption")).toString().trimmed(),
         };
-        if (application.desktopFile.isEmpty() && application.resourceClass.isEmpty()) {
+        if (application.desktopFile.isEmpty() && application.resourceClass.isEmpty()
+            && application.resourceName.isEmpty()) {
             QMessageBox::warning(widget(), i18n("Application cannot be identified"),
                                  i18n("The selected window does not provide a stable application identifier."));
             return;
@@ -355,9 +371,7 @@ void BaClickFxEffectConfig::pickExcludedApplication()
             return;
         }
 
-        const QString identifier = !application.desktopFile.isEmpty()
-            ? application.desktopFile
-            : application.resourceClass;
+        const QString identifier = applicationIdentifier(application);
         const QString displayName = !application.displayName.isEmpty()
             ? application.displayName
             : identifier;

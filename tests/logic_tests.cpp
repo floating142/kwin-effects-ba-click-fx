@@ -44,7 +44,7 @@ private Q_SLOTS:
     void outputScaleIdIsStable();
     void outputUuidIsPreferred();
     void applicationFilterNormalizesAndRoundTrips();
-    void applicationFilterPrefersDesktopFile();
+    void applicationFilterUsesCompoundIdentity();
 };
 
 void LogicTests::scalarCurveClampsAndInterpolates()
@@ -273,6 +273,7 @@ void LogicTests::applicationFilterNormalizesAndRoundTrips()
     const QVector<baclickfx::ExcludedApplication> source{{
         .desktopFile = QStringLiteral(" Org.KDE.Kate.desktop "),
         .resourceClass = QStringLiteral(" KATE "),
+        .resourceName = QStringLiteral(" KATE-MAIN "),
         .displayName = QStringLiteral("Kate"),
     }};
     const QByteArray json = baclickfx::serializeExcludedApplications(source);
@@ -280,30 +281,45 @@ void LogicTests::applicationFilterNormalizesAndRoundTrips()
     QCOMPARE(parsed.size(), 1);
     QCOMPARE(parsed.front().desktopFile, QStringLiteral("org.kde.kate"));
     QCOMPARE(parsed.front().resourceClass, QStringLiteral("kate"));
+    QCOMPARE(parsed.front().resourceName, QStringLiteral("kate-main"));
     QCOMPARE(parsed.front().displayName, QStringLiteral("Kate"));
 }
 
-void LogicTests::applicationFilterPrefersDesktopFile()
+void LogicTests::applicationFilterUsesCompoundIdentity()
 {
-    const baclickfx::ExcludedApplication rule{
-        .desktopFile = QStringLiteral("org.kde.kate"),
-        .resourceClass = QStringLiteral("kate"),
+    const baclickfx::ExcludedApplication firstGame{
+        .desktopFile = QStringLiteral("steam_app_default"),
+        .resourceClass = QStringLiteral("steam_app_default"),
+        .resourceName = QStringLiteral("game-one.exe"),
         .displayName = {},
     };
     QVERIFY(baclickfx::matchesExcludedApplication(
-        rule, QStringLiteral("org.kde.kate.desktop"), QStringLiteral("other")));
+        firstGame, QStringLiteral("steam_app_default.desktop"),
+        QStringLiteral("STEAM_APP_DEFAULT"), QStringLiteral("GAME-ONE.EXE")));
     QVERIFY(!baclickfx::matchesExcludedApplication(
-        rule, QStringLiteral("org.example.other"), QStringLiteral("kate")));
-    QVERIFY(baclickfx::matchesExcludedApplication(
-        rule, QString(), QStringLiteral("KATE")));
+        firstGame, QStringLiteral("steam_app_default"),
+        QStringLiteral("steam_app_default"), QStringLiteral("game-two.exe")));
+    QVERIFY(!baclickfx::matchesExcludedApplication(
+        firstGame, QStringLiteral("steam_app_default"),
+        QStringLiteral("steam_app_default"), QString()));
+
+    const baclickfx::ExcludedApplication secondGame{
+        .desktopFile = QStringLiteral("steam_app_default"),
+        .resourceClass = QStringLiteral("steam_app_default"),
+        .resourceName = QStringLiteral("game-two.exe"),
+        .displayName = {},
+    };
+    const QVector<baclickfx::ExcludedApplication> rules{firstGame};
+    QVERIFY(!baclickfx::containsExcludedApplication(rules, secondGame));
 
     const baclickfx::ExcludedApplication classOnlyRule{
         .desktopFile = {},
         .resourceClass = QStringLiteral("wine-game"),
+        .resourceName = {},
         .displayName = {},
     };
-    QVERIFY(baclickfx::matchesExcludedApplication(
-        classOnlyRule, QStringLiteral("unregistered.desktop"), QStringLiteral("WINE-GAME")));
+    QVERIFY(baclickfx::matchesExcludedApplication(classOnlyRule, QString(),
+                                                   QStringLiteral("WINE-GAME"), QString()));
 }
 
 QTEST_APPLESS_MAIN(LogicTests)

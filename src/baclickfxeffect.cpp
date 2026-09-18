@@ -600,7 +600,8 @@ bool BaClickFxEffect::isWindowExcluded(const Window *window) const
          candidate = candidate->transientFor(), ++depth) {
         if (baclickfx::isApplicationExcluded(
                 m_excludedApplications,
-                candidate->desktopFileName(), candidate->resourceClass())) {
+                candidate->desktopFileName(), candidate->resourceClass(),
+                candidate->resourceName())) {
             return true;
         }
     }

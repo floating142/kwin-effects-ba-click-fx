@@ -21,35 +21,34 @@ QString normalizeApplicationId(const QString &value)
 
 bool matchesExcludedApplication(const ExcludedApplication &rule,
                                 const QString &desktopFile,
-                                const QString &resourceClass)
+                                const QString &resourceClass,
+                                const QString &resourceName)
 {
     const QString actualDesktopFile = normalizeApplicationId(desktopFile);
-    if (!rule.desktopFile.isEmpty() && !actualDesktopFile.isEmpty()) {
-        return rule.desktopFile == actualDesktopFile;
-    }
-
     const QString actualResourceClass = normalizeApplicationId(resourceClass);
-    return !rule.resourceClass.isEmpty()
-        && !actualResourceClass.isEmpty()
-        && rule.resourceClass == actualResourceClass;
+    const QString actualResourceName = normalizeApplicationId(resourceName);
+
+    bool hasIdentity = false;
+    const auto compareField = [&hasIdentity](const QString &expected, const QString &actual) {
+        if (expected.isEmpty()) {
+            return true;
+        }
+        hasIdentity = true;
+        return !actual.isEmpty() && expected == actual;
+    };
+    return compareField(rule.desktopFile, actualDesktopFile)
+        && compareField(rule.resourceClass, actualResourceClass)
+        && compareField(rule.resourceName, actualResourceName)
+        && hasIdentity;
 }
 
 bool isApplicationExcluded(const QVector<ExcludedApplication> &rules,
                            const QString &desktopFile,
-                           const QString &resourceClass)
+                           const QString &resourceClass,
+                           const QString &resourceName)
 {
-    const QString actualDesktopFile = normalizeApplicationId(desktopFile);
-    const QString actualResourceClass = normalizeApplicationId(resourceClass);
     for (const ExcludedApplication &rule : rules) {
-        if (!rule.desktopFile.isEmpty() && !actualDesktopFile.isEmpty()) {
-            if (rule.desktopFile == actualDesktopFile) {
-                return true;
-            }
-            continue;
-        }
-        if (!rule.resourceClass.isEmpty()
-            && !actualResourceClass.isEmpty()
-            && rule.resourceClass == actualResourceClass) {
+        if (matchesExcludedApplication(rule, desktopFile, resourceClass, resourceName)) {
             return true;
         }
     }
@@ -60,8 +59,9 @@ bool containsExcludedApplication(const QVector<ExcludedApplication> &rules,
                                  const ExcludedApplication &candidate)
 {
     for (const ExcludedApplication &rule : rules) {
-        if (matchesExcludedApplication(rule, candidate.desktopFile, candidate.resourceClass)
-            || matchesExcludedApplication(candidate, rule.desktopFile, rule.resourceClass)) {
+        if (rule.desktopFile == candidate.desktopFile
+            && rule.resourceClass == candidate.resourceClass
+            && rule.resourceName == candidate.resourceName) {
             return true;
         }
     }
@@ -82,9 +82,12 @@ QVector<ExcludedApplication> excludedApplicationsFromJson(const QJsonArray &arra
                 object.value(QStringLiteral("desktopFile")).toString()),
             .resourceClass = normalizeApplicationId(
                 object.value(QStringLiteral("resourceClass")).toString()),
+            .resourceName = normalizeApplicationId(
+                object.value(QStringLiteral("resourceName")).toString()),
             .displayName = object.value(QStringLiteral("displayName")).toString().trimmed(),
         };
-        if ((application.desktopFile.isEmpty() && application.resourceClass.isEmpty())
+        if ((application.desktopFile.isEmpty() && application.resourceClass.isEmpty()
+             && application.resourceName.isEmpty())
             || containsExcludedApplication(result, application)) {
             continue;
         }
@@ -102,9 +105,11 @@ QJsonArray excludedApplicationsToJson(const QVector<ExcludedApplication> &rules)
         ExcludedApplication rule{
             .desktopFile = normalizeApplicationId(raw.desktopFile),
             .resourceClass = normalizeApplicationId(raw.resourceClass),
+            .resourceName = normalizeApplicationId(raw.resourceName),
             .displayName = raw.displayName.trimmed(),
         };
-        if ((rule.desktopFile.isEmpty() && rule.resourceClass.isEmpty())
+        if ((rule.desktopFile.isEmpty() && rule.resourceClass.isEmpty()
+             && rule.resourceName.isEmpty())
             || containsExcludedApplication(unique, rule)) {
             continue;
         }
@@ -116,6 +121,9 @@ QJsonArray excludedApplicationsToJson(const QVector<ExcludedApplication> &rules)
         }
         if (!rule.resourceClass.isEmpty()) {
             object.insert(QStringLiteral("resourceClass"), rule.resourceClass);
+        }
+        if (!rule.resourceName.isEmpty()) {
+            object.insert(QStringLiteral("resourceName"), rule.resourceName);
         }
         if (!rule.displayName.isEmpty()) {
             object.insert(QStringLiteral("displayName"), rule.displayName);

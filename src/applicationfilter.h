@@ -14,19 +14,22 @@ namespace baclickfx
 struct ExcludedApplication {
     QString desktopFile;
     QString resourceClass;
+    QString resourceName;
     QString displayName;
 };
 
-/// 将 desktop-file ID 或窗口类名转成用于比较的规范形式。
+/// 将窗口标识规范化，避免大小写、空白和 .desktop 后缀影响比较。
 QString normalizeApplicationId(const QString &value);
 
-/// 优先比较 desktop-file ID；它不可用时才回退到窗口类名。
+/// 规则中记录的每项标识都必须由窗口提供并完全相符。
 bool matchesExcludedApplication(const ExcludedApplication &rule,
                                 const QString &desktopFile,
-                                const QString &resourceClass);
+                                const QString &resourceClass,
+                                const QString &resourceName);
 bool isApplicationExcluded(const QVector<ExcludedApplication> &rules,
                            const QString &desktopFile,
-                           const QString &resourceClass);
+                           const QString &resourceClass,
+                           const QString &resourceName);
 
 bool containsExcludedApplication(const QVector<ExcludedApplication> &rules,
                                  const ExcludedApplication &candidate);
