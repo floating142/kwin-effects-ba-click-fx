@@ -52,44 +52,81 @@ namespace
 // QSlider 仅保存整数，因此小数配置统一缩放 100 倍。
 constexpr int kSliderScale = 100;
 
-QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
+QString shortenedId(const QString &value)
 {
-    QStringList parts;
-    if (!application.desktopFile.isEmpty()) {
-        parts.append(QStringLiteral("desktop=%1").arg(application.desktopFile));
-    }
-    if (!application.resourceClass.isEmpty()) {
-        parts.append(QStringLiteral("class=%1").arg(application.resourceClass));
-    }
-    if (!application.resourceName.isEmpty()) {
-        parts.append(QStringLiteral("instance=%1").arg(application.resourceName));
-    }
-    if (!application.processCommand.isEmpty()) {
-        parts.append(QStringLiteral("command=%1").arg(application.processCommand));
-    }
-    if (!application.winePrefix.isEmpty()) {
-        parts.append(QStringLiteral("wine-prefix=%1").arg(application.winePrefix));
-    }
-    return parts.join(QStringLiteral(" · "));
+    constexpr qsizetype visibleCharacters = 8;
+    return value.size() > visibleCharacters
+        ? value.first(visibleCharacters) + QChar(0x2026)
+        : value;
 }
 
-QString applicationDisplayName(const baclickfx::ExcludedApplication &application,
+QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
+{
+    const baclickfx::ApplicationIdentity &identity = application.identity;
+    switch (identity.kind) {
+    case baclickfx::ApplicationIdentityKind::DesktopFile:
+        return i18n("Desktop file · %1", identity.value);
+    case baclickfx::ApplicationIdentityKind::Launcher: {
+        const QString provider = identity.value.section(u':', 0, 0);
+        const QString id = identity.value.section(u':', 1);
+        if (provider == QLatin1String("lutris")) {
+            return i18n("Lutris · %1", shortenedId(id));
+        }
+        if (provider == QLatin1String("steam")) {
+            return i18n("Steam · %1", id);
+        }
+        return i18n("Launcher · %1", shortenedId(identity.value));
+    }
+    case baclickfx::ApplicationIdentityKind::Process:
+        return i18n("Process · %1", identity.value.section(u'/', -1));
+    case baclickfx::ApplicationIdentityKind::WindowClass: {
+        const QString windowClass = identity.qualifier.isEmpty()
+            ? identity.value
+            : QStringLiteral("%1 / %2").arg(identity.value, identity.qualifier);
+        return i18n("Window class · %1", windowClass);
+    }
+    case baclickfx::ApplicationIdentityKind::Invalid:
+        return {};
+    }
+    return {};
+}
+
+QString applicationIdentityDetails(const baclickfx::ExcludedApplication &application)
+{
+    const baclickfx::ApplicationIdentity &identity = application.identity;
+    switch (identity.kind) {
+    case baclickfx::ApplicationIdentityKind::DesktopFile:
+    case baclickfx::ApplicationIdentityKind::Launcher:
+        return identity.value;
+    case baclickfx::ApplicationIdentityKind::Process:
+        return identity.qualifier.isEmpty()
+            ? identity.value
+            : QStringLiteral("%1\n%2").arg(identity.value, identity.qualifier);
+    case baclickfx::ApplicationIdentityKind::WindowClass:
+        return identity.qualifier.isEmpty()
+            ? identity.value
+            : QStringLiteral("%1 / %2").arg(identity.value, identity.qualifier);
+    case baclickfx::ApplicationIdentityKind::Invalid:
+        return {};
+    }
+    return {};
+}
+
+QString applicationDisplayName(const baclickfx::ApplicationIdentity &identity,
+                               const baclickfx::ProcessIdentity &process,
                                const QString &caption)
 {
-    if (!application.desktopFile.isEmpty()) {
-        const KService::Ptr service = KService::serviceByDesktopName(application.desktopFile);
+    if (identity.kind == baclickfx::ApplicationIdentityKind::DesktopFile) {
+        const KService::Ptr service = KService::serviceByDesktopName(identity.value);
         if (service && !service->name().isEmpty()) {
             return service->name();
         }
     }
-    if (!application.processCommand.isEmpty()) {
-        return application.processCommand.section(u'/', -1);
+    if (!process.command.isEmpty()) {
+        return process.command.section(u'/', -1);
     }
-    if (!application.resourceClass.isEmpty()) {
-        return application.resourceClass;
-    }
-    if (!application.resourceName.isEmpty()) {
-        return application.resourceName;
+    if (identity.isValid()) {
+        return identity.value;
     }
     return caption.trimmed();
 }
@@ -335,7 +372,7 @@ void BaClickFxEffectConfig::rebuildExcludedApplications()
         auto *item = new QTreeWidgetItem(tree, {displayName, identifier});
         item->setData(0, Qt::UserRole, index);
         item->setToolTip(0, displayName);
-        item->setToolTip(1, identifier);
+        item->setToolTip(1, applicationIdentityDetails(application));
     }
     tree->resizeColumnToContents(0);
     m_ui.removeExcludedApplicationButton->setEnabled(false);
@@ -379,26 +416,22 @@ void BaClickFxEffectConfig::pickExcludedApplication()
 
         const QVariantMap info = reply.value();
         const qint64 pid = info.value(QStringLiteral("pid")).toLongLong();
-        const baclickfx::ProcessIdentity process = baclickfx::processIdentity(pid);
         const QString desktopFile = baclickfx::normalizeApplicationId(
             info.value(QStringLiteral("desktopFile")).toString());
+        // desktop-file ID 足以代表整个应用；仅在缺失时读取进程身份。
+        const baclickfx::ProcessIdentity process = desktopFile.isEmpty()
+            ? baclickfx::processIdentity(pid) : baclickfx::ProcessIdentity();
+        const baclickfx::ApplicationIdentity identity = baclickfx::identifyApplication(
+            desktopFile,
+            info.value(QStringLiteral("resourceClass")).toString(),
+            info.value(QStringLiteral("resourceName")).toString(),
+            process);
         baclickfx::ExcludedApplication application{
-            .desktopFile = desktopFile,
-            .resourceClass = baclickfx::normalizeApplicationId(
-                info.value(QStringLiteral("resourceClass")).toString()),
-            .resourceName = baclickfx::normalizeApplicationId(
-                info.value(QStringLiteral("resourceName")).toString()),
-            // 缺少 desktop-file ID 的 X11/Wine 窗口需要进程身份来消除
-            // steam_app_default 一类通用 WM_CLASS 的歧义。
-            .processCommand = desktopFile.isEmpty() ? process.command : QString(),
-            .winePrefix = desktopFile.isEmpty() ? process.winePrefix : QString(),
-            .displayName = {},
+            .identity = identity,
+            .displayName = applicationDisplayName(
+                identity, process, info.value(QStringLiteral("caption")).toString()),
         };
-        application.displayName = applicationDisplayName(
-            application, info.value(QStringLiteral("caption")).toString());
-        if (application.desktopFile.isEmpty() && application.resourceClass.isEmpty()
-            && application.resourceName.isEmpty() && application.processCommand.isEmpty()
-            && application.winePrefix.isEmpty()) {
+        if (!application.identity.isValid()) {
             QMessageBox::warning(widget(), i18n("Application cannot be identified"),
                                  i18n("The selected window does not provide a stable application identifier."));
             return;
@@ -664,6 +697,9 @@ void BaClickFxEffectConfig::save()
                     m_ui.excludeApplicationsCheckBox->isChecked());
     conf.writeEntry(def::kExcludedApplications,
                     baclickfx::serializeExcludedApplications(m_excludedApplications));
+    // 新格式直接占用稳定键名；旧实验键不迁移，保存时一并清理。
+    conf.deleteEntry(def::kLegacyExcludedApplicationRules);
+    conf.deleteEntry(def::kLegacyExcludedApplicationRulesV2);
 
     conf.writeEntry(def::kEnableTrail, m_ui.enableTrailCheckBox->isChecked());
     conf.writeEntry(def::kAlwaysTrail, m_ui.alwaysTrailCheckBox->isChecked());

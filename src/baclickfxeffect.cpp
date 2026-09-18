@@ -192,6 +192,11 @@ BaClickFxEffect::BaClickFxEffect()
 
     connect(effects, &EffectsHandler::mouseChanged,
             this, &BaClickFxEffect::slotMouseChanged);
+    connect(Workspace::self(), &Workspace::windowRemoved, this, [this](Window *window) {
+        if (window) {
+            m_processIdentityCache.remove(window->internalId());
+        }
+    });
 
     if (logsVerbose()) {
         qCInfo(KWIN_BA_CLICK_FX) << "BA Click FX 已加载" << debug(QStringLiteral("status"));
@@ -597,20 +602,22 @@ bool BaClickFxEffect::isWindowExcluded(const Window *window) const
     // 异常 transient 链环，正常窗口只需要一两次迭代。
     const bool hasProcessRules = std::ranges::any_of(
         m_excludedApplications, [](const baclickfx::ExcludedApplication &rule) {
-            return !rule.processCommand.isEmpty() || !rule.winePrefix.isEmpty();
+            return rule.identity.kind == baclickfx::ApplicationIdentityKind::Launcher
+                || rule.identity.kind == baclickfx::ApplicationIdentityKind::Process;
         });
     int depth = 0;
     for (const Window *candidate = window;
          candidate && depth < 16;
          candidate = candidate->transientFor(), ++depth) {
-        // 不含进程约束的普通应用规则无需访问 /proc。
-        if (baclickfx::isApplicationExcluded(
-                m_excludedApplications,
-                candidate->desktopFileName(), candidate->resourceClass(),
-                candidate->resourceName(), QString(), QString())) {
+        const baclickfx::ApplicationIdentity inexpensiveIdentity =
+            baclickfx::identifyApplication(candidate->desktopFileName(),
+                                            candidate->resourceClass(),
+                                            candidate->resourceName());
+        if (baclickfx::isApplicationExcluded(m_excludedApplications, inexpensiveIdentity)) {
             return true;
         }
-        if (!hasProcessRules) {
+        // desktop-file 是最高优先级身份；存在时绝不读取或匹配进程规则。
+        if (!hasProcessRules || !candidate->desktopFileName().isEmpty()) {
             continue;
         }
 
@@ -621,10 +628,10 @@ bool BaClickFxEffect::isWindowExcluded(const Window *window) const
                                           baclickfx::processIdentity(candidate->pid()));
             identity = m_processIdentityCache.constFind(windowId);
         }
-        if (baclickfx::isApplicationExcluded(
-                m_excludedApplications,
-                candidate->desktopFileName(), candidate->resourceClass(),
-                candidate->resourceName(), identity->command, identity->winePrefix)) {
+        const baclickfx::ApplicationIdentity processIdentity =
+            baclickfx::identifyApplication({}, candidate->resourceClass(),
+                                            candidate->resourceName(), *identity);
+        if (baclickfx::isApplicationExcluded(m_excludedApplications, processIdentity)) {
             return true;
         }
     }

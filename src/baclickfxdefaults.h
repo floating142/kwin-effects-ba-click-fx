@@ -47,7 +47,9 @@ inline constexpr const char *kDesktopOnly = "DesktopOnly";
 
 /// 应用排除规则的开关与 JSON 列表。
 inline constexpr const char *kExcludeApplications = "ExcludeApplications";
-inline constexpr const char *kExcludedApplications = "ExcludedApplicationRulesV2";
+inline constexpr const char *kExcludedApplications = "ExcludedApplications";
+inline constexpr const char *kLegacyExcludedApplicationRules = "ExcludedApplicationRules";
+inline constexpr const char *kLegacyExcludedApplicationRulesV2 = "ExcludedApplicationRulesV2";
 
 /** @} */
 

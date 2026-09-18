@@ -93,8 +93,9 @@ KWin 原生插件与当前 KWin 版本绑定；升级 KWin 后需要重新编译
 
 如需对某个应用停用特效，开启“排除指定应用”，点击“选取窗口…”后
 选中该应用的任意窗口。KWin 会返回应用标识，确认后才会加入排除列表。
-对于缺少 desktop-file 标识的 Wine/Proton 窗口，插件还会组合 Wine prefix
-和进程启动命令，避免多个游戏共用 `steam_app_default` 时互相误伤。
+对于缺少 desktop-file 标识的 Wine/Proton 窗口，插件优先使用 Lutris UUID
+或有效的 Steam App ID；启动器没有提供 ID 时，才组合 Wine prefix 和进程
+启动命令，避免多个游戏共用 `steam_app_default` 时互相误伤。
 
 卸载：
 

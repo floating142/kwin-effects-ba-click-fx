@@ -132,6 +132,24 @@ msgstr "應用程式"
 msgid "Identifier"
 msgstr "識別碼"
 
+msgid "Desktop file · %1"
+msgstr "桌面項目 · %1"
+
+msgid "Lutris · %1"
+msgstr "Lutris · %1"
+
+msgid "Steam · %1"
+msgstr "Steam · %1"
+
+msgid "Launcher · %1"
+msgstr "啟動器 · %1"
+
+msgid "Process · %1"
+msgstr "行程 · %1"
+
+msgid "Window class · %1"
+msgstr "視窗類別 · %1"
+
 msgid "Pick window…"
 msgstr "選取視窗…"
 
