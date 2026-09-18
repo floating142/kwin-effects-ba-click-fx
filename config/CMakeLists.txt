@@ -27,6 +27,7 @@ target_link_libraries(kwin_ba_click_fx_config PRIVATE
     KF6::CoreAddons
     KF6::I18n
     KF6::KCMUtils
+    KF6::Service
 )
 
 # 安装到 KWin 桌面特效配置插件目录。

@@ -45,6 +45,7 @@ private Q_SLOTS:
     void outputUuidIsPreferred();
     void applicationFilterNormalizesAndRoundTrips();
     void applicationFilterUsesCompoundIdentity();
+    void processIdentityReadsCurrentProcess();
 };
 
 void LogicTests::scalarCurveClampsAndInterpolates()
@@ -274,6 +275,8 @@ void LogicTests::applicationFilterNormalizesAndRoundTrips()
         .desktopFile = QStringLiteral(" Org.KDE.Kate.desktop "),
         .resourceClass = QStringLiteral(" KATE "),
         .resourceName = QStringLiteral(" KATE-MAIN "),
+        .processCommand = QStringLiteral(" /USR/BIN/KATE "),
+        .winePrefix = QStringLiteral(" /tmp/example-prefix/ "),
         .displayName = QStringLiteral("Kate"),
     }};
     const QByteArray json = baclickfx::serializeExcludedApplications(source);
@@ -282,31 +285,39 @@ void LogicTests::applicationFilterNormalizesAndRoundTrips()
     QCOMPARE(parsed.front().desktopFile, QStringLiteral("org.kde.kate"));
     QCOMPARE(parsed.front().resourceClass, QStringLiteral("kate"));
     QCOMPARE(parsed.front().resourceName, QStringLiteral("kate-main"));
+    QCOMPARE(parsed.front().processCommand, QStringLiteral("/usr/bin/kate"));
+    QCOMPARE(parsed.front().winePrefix, QStringLiteral("/tmp/example-prefix"));
     QCOMPARE(parsed.front().displayName, QStringLiteral("Kate"));
 }
 
 void LogicTests::applicationFilterUsesCompoundIdentity()
 {
     const baclickfx::ExcludedApplication firstGame{
-        .desktopFile = QStringLiteral("steam_app_default"),
+        .desktopFile = {},
         .resourceClass = QStringLiteral("steam_app_default"),
-        .resourceName = QStringLiteral("game-one.exe"),
+        .resourceName = QStringLiteral("steam_app_default"),
+        .processCommand = QStringLiteral("c:/games/game-one.exe"),
+        .winePrefix = QStringLiteral("/games/prefix-one"),
         .displayName = {},
     };
     QVERIFY(baclickfx::matchesExcludedApplication(
-        firstGame, QStringLiteral("steam_app_default.desktop"),
-        QStringLiteral("STEAM_APP_DEFAULT"), QStringLiteral("GAME-ONE.EXE")));
+        firstGame, QString(), QStringLiteral("STEAM_APP_DEFAULT"),
+        QStringLiteral("steam_app_default"), QStringLiteral("C:\\Games\\Game-One.exe"),
+        QStringLiteral("/games/prefix-one/")));
     QVERIFY(!baclickfx::matchesExcludedApplication(
-        firstGame, QStringLiteral("steam_app_default"),
-        QStringLiteral("steam_app_default"), QStringLiteral("game-two.exe")));
+        firstGame, QString(), QStringLiteral("steam_app_default"),
+        QStringLiteral("steam_app_default"), QStringLiteral("C:\\Games\\Game-Two.exe"),
+        QStringLiteral("/games/prefix-two")));
     QVERIFY(!baclickfx::matchesExcludedApplication(
-        firstGame, QStringLiteral("steam_app_default"),
-        QStringLiteral("steam_app_default"), QString()));
+        firstGame, QString(), QStringLiteral("steam_app_default"),
+        QStringLiteral("steam_app_default"), QString(), QString()));
 
     const baclickfx::ExcludedApplication secondGame{
-        .desktopFile = QStringLiteral("steam_app_default"),
+        .desktopFile = {},
         .resourceClass = QStringLiteral("steam_app_default"),
-        .resourceName = QStringLiteral("game-two.exe"),
+        .resourceName = QStringLiteral("steam_app_default"),
+        .processCommand = QStringLiteral("c:/games/game-two.exe"),
+        .winePrefix = QStringLiteral("/games/prefix-two"),
         .displayName = {},
     };
     const QVector<baclickfx::ExcludedApplication> rules{firstGame};
@@ -316,10 +327,20 @@ void LogicTests::applicationFilterUsesCompoundIdentity()
         .desktopFile = {},
         .resourceClass = QStringLiteral("wine-game"),
         .resourceName = {},
+        .processCommand = {},
+        .winePrefix = {},
         .displayName = {},
     };
     QVERIFY(baclickfx::matchesExcludedApplication(classOnlyRule, QString(),
-                                                   QStringLiteral("WINE-GAME"), QString()));
+                                                   QStringLiteral("WINE-GAME"), QString(),
+                                                   QString(), QString()));
+}
+
+void LogicTests::processIdentityReadsCurrentProcess()
+{
+    const baclickfx::ProcessIdentity identity = baclickfx::processIdentity(
+        QCoreApplication::applicationPid());
+    QVERIFY(!identity.command.isEmpty());
 }
 
 QTEST_APPLESS_MAIN(LogicTests)

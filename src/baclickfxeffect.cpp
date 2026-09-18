@@ -277,6 +277,7 @@ void BaClickFxEffect::loadConfig()
                                              def::kExcludeApplicationsDefault);
     m_excludedApplications = baclickfx::parseExcludedApplications(
         group.readEntry(def::kExcludedApplications, QByteArray()));
+    m_processIdentityCache.clear();
 
     // GPU timer 只在帧统计及以上级别启用。
     m_gpu.setLogLevel(m_logLevel);
@@ -594,14 +595,36 @@ bool BaClickFxEffect::isWindowExcluded(const Window *window) const
 {
     // 对话框和弹出窗口通常继承主窗口的应用身份。深度上限防御
     // 异常 transient 链环，正常窗口只需要一两次迭代。
+    const bool hasProcessRules = std::ranges::any_of(
+        m_excludedApplications, [](const baclickfx::ExcludedApplication &rule) {
+            return !rule.processCommand.isEmpty() || !rule.winePrefix.isEmpty();
+        });
     int depth = 0;
     for (const Window *candidate = window;
          candidate && depth < 16;
          candidate = candidate->transientFor(), ++depth) {
+        // 不含进程约束的普通应用规则无需访问 /proc。
         if (baclickfx::isApplicationExcluded(
                 m_excludedApplications,
                 candidate->desktopFileName(), candidate->resourceClass(),
-                candidate->resourceName())) {
+                candidate->resourceName(), QString(), QString())) {
+            return true;
+        }
+        if (!hasProcessRules) {
+            continue;
+        }
+
+        const QUuid windowId = candidate->internalId();
+        auto identity = m_processIdentityCache.constFind(windowId);
+        if (identity == m_processIdentityCache.cend()) {
+            m_processIdentityCache.insert(windowId,
+                                          baclickfx::processIdentity(candidate->pid()));
+            identity = m_processIdentityCache.constFind(windowId);
+        }
+        if (baclickfx::isApplicationExcluded(
+                m_excludedApplications,
+                candidate->desktopFileName(), candidate->resourceClass(),
+                candidate->resourceName(), identity->command, identity->winePrefix)) {
             return true;
         }
     }

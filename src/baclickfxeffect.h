@@ -20,6 +20,7 @@
 #include <QHash>
 #include <QPointF>
 #include <QJsonObject>
+#include <QUuid>
 
 #include <chrono>
 #include <cstdint>
@@ -164,6 +165,8 @@ private:
     bool m_desktopOnly = baclickfx::defaults::kDesktopOnlyDefault;
     bool m_excludeApplications = baclickfx::defaults::kExcludeApplicationsDefault;
     QVector<baclickfx::ExcludedApplication> m_excludedApplications;
+    // /proc 身份按 KWin 窗口 UUID 缓存，避免 Always Trail 的移动事件重复读文件。
+    mutable QHash<QUuid, baclickfx::ProcessIdentity> m_processIdentityCache;
     // 按下时固化本次手势的过滤结果，直到松开左键。
     bool m_pressSuppressed = false;
 

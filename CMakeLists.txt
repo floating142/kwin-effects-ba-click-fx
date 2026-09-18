@@ -46,7 +46,7 @@ include(FeatureSummary)
 # KWinConfig.cmake 不会加载其中全部组件，因此需在查找 KWin 前显式加载。
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui DBus Quick Widgets)
 # KCMUtils 为配置模块提供 KCModule 基类和 ki18n_wrap_ui。
-find_package(KF6 6.22 REQUIRED COMPONENTS Config CoreAddons I18n KCMUtils WindowSystem)
+find_package(KF6 6.22 REQUIRED COMPONENTS Config CoreAddons I18n KCMUtils Service WindowSystem)
 
 find_package(KWin REQUIRED)
 

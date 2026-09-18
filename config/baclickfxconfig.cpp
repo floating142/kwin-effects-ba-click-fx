@@ -9,6 +9,7 @@
 #include <KConfigGroup>
 #include <KLocalizedString>
 #include <KPluginFactory>
+#include <KService>
 #include <KSharedConfig>
 
 #include <QDBusConnection>
@@ -63,7 +64,34 @@ QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
     if (!application.resourceName.isEmpty()) {
         parts.append(QStringLiteral("instance=%1").arg(application.resourceName));
     }
+    if (!application.processCommand.isEmpty()) {
+        parts.append(QStringLiteral("command=%1").arg(application.processCommand));
+    }
+    if (!application.winePrefix.isEmpty()) {
+        parts.append(QStringLiteral("wine-prefix=%1").arg(application.winePrefix));
+    }
     return parts.join(QStringLiteral(" · "));
+}
+
+QString applicationDisplayName(const baclickfx::ExcludedApplication &application,
+                               const QString &caption)
+{
+    if (!application.desktopFile.isEmpty()) {
+        const KService::Ptr service = KService::serviceByDesktopName(application.desktopFile);
+        if (service && !service->name().isEmpty()) {
+            return service->name();
+        }
+    }
+    if (!application.processCommand.isEmpty()) {
+        return application.processCommand.section(u'/', -1);
+    }
+    if (!application.resourceClass.isEmpty()) {
+        return application.resourceClass;
+    }
+    if (!application.resourceName.isEmpty()) {
+        return application.resourceName;
+    }
+    return caption.trimmed();
 }
 
 }
@@ -350,17 +378,27 @@ void BaClickFxEffectConfig::pickExcludedApplication()
         }
 
         const QVariantMap info = reply.value();
+        const qint64 pid = info.value(QStringLiteral("pid")).toLongLong();
+        const baclickfx::ProcessIdentity process = baclickfx::processIdentity(pid);
+        const QString desktopFile = baclickfx::normalizeApplicationId(
+            info.value(QStringLiteral("desktopFile")).toString());
         baclickfx::ExcludedApplication application{
-            .desktopFile = baclickfx::normalizeApplicationId(
-                info.value(QStringLiteral("desktopFile")).toString()),
+            .desktopFile = desktopFile,
             .resourceClass = baclickfx::normalizeApplicationId(
                 info.value(QStringLiteral("resourceClass")).toString()),
             .resourceName = baclickfx::normalizeApplicationId(
                 info.value(QStringLiteral("resourceName")).toString()),
-            .displayName = info.value(QStringLiteral("caption")).toString().trimmed(),
+            // 缺少 desktop-file ID 的 X11/Wine 窗口需要进程身份来消除
+            // steam_app_default 一类通用 WM_CLASS 的歧义。
+            .processCommand = desktopFile.isEmpty() ? process.command : QString(),
+            .winePrefix = desktopFile.isEmpty() ? process.winePrefix : QString(),
+            .displayName = {},
         };
+        application.displayName = applicationDisplayName(
+            application, info.value(QStringLiteral("caption")).toString());
         if (application.desktopFile.isEmpty() && application.resourceClass.isEmpty()
-            && application.resourceName.isEmpty()) {
+            && application.resourceName.isEmpty() && application.processCommand.isEmpty()
+            && application.winePrefix.isEmpty()) {
             QMessageBox::warning(widget(), i18n("Application cannot be identified"),
                                  i18n("The selected window does not provide a stable application identifier."));
             return;
