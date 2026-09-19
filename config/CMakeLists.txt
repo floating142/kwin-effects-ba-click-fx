@@ -6,6 +6,7 @@ add_library(kwin_ba_click_fx_config MODULE)
 
 target_sources(kwin_ba_click_fx_config PRIVATE
     baclickfxconfig.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/applicationfilter.cpp
 )
 
 # uic 在构建目录生成 ui_baclickfxconfig.h；同时包含 src 目录，以便配置模块与特效
@@ -26,6 +27,7 @@ target_link_libraries(kwin_ba_click_fx_config PRIVATE
     KF6::CoreAddons
     KF6::I18n
     KF6::KCMUtils
+    KF6::Service
 )
 
 # 安装到 KWin 桌面特效配置插件目录。

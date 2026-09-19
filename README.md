@@ -41,20 +41,20 @@ KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。本项目兼容 KW
 Arch Linux：
 
 ```bash
-sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin libepoxy qt6-base qt6-declarative vulkan-headers
+sudo pacman -S --needed base-devel cmake extra-cmake-modules kservice kwin libepoxy qt6-base qt6-declarative vulkan-headers
 ```
 
 Fedora：
 
 ```bash
-sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
+sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kf6-kservice-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
 Kubuntu：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev qt6-declarative-dev qt6-tools-dev libvulkan-dev
+sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev qt6-declarative-dev qt6-tools-dev libvulkan-dev
 ```
 
 如需运行 `scripts/verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
@@ -82,12 +82,20 @@ KWin 原生插件与当前 KWin 版本绑定；升级 KWin 后需要重新编译
 - 时间缩放
 - 整体尺寸
 - 显示器独立缩放
+- 仅桌面点击触发
+- 按应用排除特效
 - 拖尾开关
 - 沿途小三角开关
 - 调试日志
 - 重绘区域边框
 
 颜色、粒子数量、拖尾宽度、发射间距和 Bloom 参数保持 Unity 原始值，不作为用户调节项。
+
+如需对某个应用停用特效，开启“排除指定应用”，点击“选取窗口…”后
+选中该应用的任意窗口。KWin 会返回应用标识，确认后才会加入排除列表。
+对于缺少 desktop-file 标识的 Wine/Proton 窗口，插件优先组合 Lutris UUID
+或有效的 Steam App ID 与可执行文件名；因此同一游戏的启动器和游戏本体也能
+分别排除。启动器没有提供 ID 时，才组合 Wine prefix 和进程启动命令。
 
 卸载：
 

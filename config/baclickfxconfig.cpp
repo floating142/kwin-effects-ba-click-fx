@@ -9,6 +9,7 @@
 #include <KConfigGroup>
 #include <KLocalizedString>
 #include <KPluginFactory>
+#include <KService>
 #include <KSharedConfig>
 
 #include <QDBusConnection>
@@ -37,8 +38,12 @@
 #include <QIcon>
 #include <QLabel>
 #include <QHBoxLayout>
+#include <QMessageBox>
+#include <QTreeWidget>
 
 #include <algorithm>
+#include <functional>
+#include <limits>
 
 namespace def = baclickfx::defaults;
 
@@ -46,6 +51,89 @@ namespace
 {
 // QSlider 仅保存整数，因此小数配置统一缩放 100 倍。
 constexpr int kSliderScale = 100;
+
+QString shortenedId(const QString &value)
+{
+    constexpr qsizetype visibleCharacters = 8;
+    return value.size() > visibleCharacters
+        ? value.first(visibleCharacters) + QChar(0x2026)
+        : value;
+}
+
+QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
+{
+    const baclickfx::ApplicationIdentity &identity = application.identity;
+    switch (identity.kind) {
+    case baclickfx::ApplicationIdentityKind::DesktopFile:
+        return i18n("Desktop file · %1", identity.value);
+    case baclickfx::ApplicationIdentityKind::Launcher: {
+        const QString provider = identity.value.section(u':', 0, 0);
+        const QString id = identity.value.section(u':', 1);
+        const QString component = identity.qualifier;
+        if (provider == QLatin1String("lutris")) {
+            return i18n("Lutris · %1", QStringLiteral("%1 · %2")
+                        .arg(shortenedId(id), component));
+        }
+        if (provider == QLatin1String("steam")) {
+            return i18n("Steam · %1", QStringLiteral("%1 · %2").arg(id, component));
+        }
+        return i18n("Launcher · %1", QStringLiteral("%1 · %2")
+                    .arg(shortenedId(identity.value), component));
+    }
+    case baclickfx::ApplicationIdentityKind::Process:
+        return i18n("Process · %1", identity.value.section(u'/', -1));
+    case baclickfx::ApplicationIdentityKind::WindowClass: {
+        const QString windowClass = identity.qualifier.isEmpty()
+            ? identity.value
+            : QStringLiteral("%1 / %2").arg(identity.value, identity.qualifier);
+        return i18n("Window class · %1", windowClass);
+    }
+    case baclickfx::ApplicationIdentityKind::Invalid:
+        return {};
+    }
+    return {};
+}
+
+QString applicationIdentityDetails(const baclickfx::ExcludedApplication &application)
+{
+    const baclickfx::ApplicationIdentity &identity = application.identity;
+    switch (identity.kind) {
+    case baclickfx::ApplicationIdentityKind::DesktopFile:
+        return identity.value;
+    case baclickfx::ApplicationIdentityKind::Launcher:
+        return QStringLiteral("%1\n%2").arg(identity.value, identity.qualifier);
+    case baclickfx::ApplicationIdentityKind::Process:
+        return identity.qualifier.isEmpty()
+            ? identity.value
+            : QStringLiteral("%1\n%2").arg(identity.value, identity.qualifier);
+    case baclickfx::ApplicationIdentityKind::WindowClass:
+        return identity.qualifier.isEmpty()
+            ? identity.value
+            : QStringLiteral("%1 / %2").arg(identity.value, identity.qualifier);
+    case baclickfx::ApplicationIdentityKind::Invalid:
+        return {};
+    }
+    return {};
+}
+
+QString applicationDisplayName(const baclickfx::ApplicationIdentity &identity,
+                               const baclickfx::ProcessIdentity &process,
+                               const QString &caption)
+{
+    if (identity.kind == baclickfx::ApplicationIdentityKind::DesktopFile) {
+        const KService::Ptr service = KService::serviceByDesktopName(identity.value);
+        if (service && !service->name().isEmpty()) {
+            return service->name();
+        }
+    }
+    if (!process.command.isEmpty()) {
+        return process.command.section(u'/', -1);
+    }
+    if (identity.isValid()) {
+        return identity.value;
+    }
+    return caption.trimmed();
+}
 
 }
 
@@ -77,6 +165,27 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
                                      int(def::kGlobalScaleMax * kSliderScale));
 
     // 所有可编辑控件变化时由 KCModule 更新「应用」按钮状态。
+    connect(m_ui.desktopOnlyCheckBox, &QCheckBox::toggled,
+            this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.desktopOnlyCheckBox, &QCheckBox::toggled,
+            this, [this] { sendPreview(); });
+    connect(m_ui.excludeApplicationsCheckBox, &QCheckBox::toggled,
+            this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.excludeApplicationsCheckBox, &QCheckBox::toggled,
+            this, [this](bool enabled) {
+        m_ui.excludedApplicationsGroupBox->setVisible(enabled);
+        sendPreview();
+    });
+    connect(m_ui.addExcludedApplicationButton, &QPushButton::clicked,
+            this, &BaClickFxEffectConfig::pickExcludedApplication);
+    connect(m_ui.removeExcludedApplicationButton, &QPushButton::clicked,
+            this, &BaClickFxEffectConfig::removeSelectedExcludedApplications);
+    connect(m_ui.excludedApplicationsTreeWidget, &QTreeWidget::itemSelectionChanged,
+            this, [this]() {
+        m_ui.removeExcludedApplicationButton->setEnabled(
+            !m_ui.excludedApplicationsTreeWidget->selectedItems().isEmpty());
+    });
+    m_ui.excludedApplicationsGroupBox->setVisible(false);
     connect(m_ui.timeScaleSlider, &QSlider::valueChanged,
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.globalScaleSlider, &QSlider::valueChanged,
@@ -254,6 +363,133 @@ BaClickFxEffectConfig::~BaClickFxEffectConfig()
     restorePersistedPreview();
 }
 
+void BaClickFxEffectConfig::rebuildExcludedApplications()
+{
+    QTreeWidget *tree = m_ui.excludedApplicationsTreeWidget;
+    tree->clear();
+    for (int index = 0; index < m_excludedApplications.size(); ++index) {
+        const baclickfx::ExcludedApplication &application = m_excludedApplications.at(index);
+        const QString identifier = applicationIdentifier(application);
+        const QString displayName = !application.displayName.isEmpty()
+            ? application.displayName
+            : identifier;
+        auto *item = new QTreeWidgetItem(tree, {displayName, identifier});
+        item->setData(0, Qt::UserRole, index);
+        item->setToolTip(0, displayName);
+        item->setToolTip(1, applicationIdentityDetails(application));
+    }
+    tree->resizeColumnToContents(0);
+    m_ui.removeExcludedApplicationButton->setEnabled(false);
+}
+
+void BaClickFxEffectConfig::pickExcludedApplication()
+{
+    if (m_windowPickerWatcher) {
+        return;
+    }
+
+    // KWin 原生选窗会正确处理 Wayland/X11，并在 Esc 时以 UserCancel 结束。
+    // 配置页只消费它返回的稳定应用标识，不自行抓取全局输入。
+    QDBusMessage message = QDBusMessage::createMethodCall(
+        QStringLiteral("org.kde.KWin"), QStringLiteral("/KWin"),
+        QStringLiteral("org.kde.KWin"), QStringLiteral("queryWindowInfo"));
+    auto *watcher = new QDBusPendingCallWatcher(
+        QDBusConnection::sessionBus().asyncCall(
+            message, std::numeric_limits<int>::max()), this);
+    m_windowPickerWatcher = watcher;
+    m_ui.addExcludedApplicationButton->setEnabled(false);
+    m_ui.addExcludedApplicationButton->setText(i18n("Click a window…"));
+
+    connect(watcher, &QDBusPendingCallWatcher::finished, this,
+            [this](QDBusPendingCallWatcher *call) {
+        const QDBusPendingReply<QVariantMap> reply = *call;
+        if (m_windowPickerWatcher == call) {
+            m_windowPickerWatcher = nullptr;
+        }
+        m_ui.addExcludedApplicationButton->setEnabled(true);
+        m_ui.addExcludedApplicationButton->setText(i18n("Pick window…"));
+        call->deleteLater();
+
+        if (reply.isError()) {
+            if (reply.error().name() != QLatin1String("org.kde.KWin.Error.UserCancel")) {
+                QMessageBox::warning(widget(), i18n("Window selection failed"),
+                                     reply.error().message());
+            }
+            return;
+        }
+
+        const QVariantMap info = reply.value();
+        const qint64 pid = info.value(QStringLiteral("pid")).toLongLong();
+        const QString desktopFile = baclickfx::normalizeApplicationId(
+            info.value(QStringLiteral("desktopFile")).toString());
+        // desktop-file ID 足以代表整个应用；仅在缺失时读取进程身份。
+        const baclickfx::ProcessIdentity process = desktopFile.isEmpty()
+            ? baclickfx::processIdentity(pid) : baclickfx::ProcessIdentity();
+        const baclickfx::ApplicationIdentity identity = baclickfx::identifyApplication(
+            desktopFile,
+            info.value(QStringLiteral("resourceClass")).toString(),
+            info.value(QStringLiteral("resourceName")).toString(),
+            process);
+        baclickfx::ExcludedApplication application{
+            .identity = identity,
+            .displayName = applicationDisplayName(
+                identity, process, info.value(QStringLiteral("caption")).toString()),
+        };
+        if (!application.identity.isValid()) {
+            QMessageBox::warning(widget(), i18n("Application cannot be identified"),
+                                 i18n("The selected window does not provide a stable application identifier."));
+            return;
+        }
+        if (baclickfx::containsExcludedApplication(m_excludedApplications, application)) {
+            QMessageBox::information(widget(), i18n("Application already excluded"),
+                                     i18n("This application is already in the exclusion list."));
+            return;
+        }
+
+        const QString identifier = applicationIdentifier(application);
+        const QString displayName = !application.displayName.isEmpty()
+            ? application.displayName
+            : identifier;
+        const QString confirmation = i18n(
+            "Exclude all windows belonging to %1?\n\nApplication identifier: %2",
+            displayName, identifier);
+        QMessageBox confirmationBox(QMessageBox::Question, i18n("Exclude application"),
+                                    confirmation, QMessageBox::Cancel, widget());
+        QPushButton *excludeButton = confirmationBox.addButton(
+            i18n("Exclude"), QMessageBox::AcceptRole);
+        confirmationBox.setDefaultButton(excludeButton);
+        confirmationBox.exec();
+        if (confirmationBox.clickedButton() != excludeButton) {
+            return;
+        }
+
+        m_excludedApplications.push_back(std::move(application));
+        rebuildExcludedApplications();
+        markAsChanged();
+        sendPreview();
+    });
+}
+
+void BaClickFxEffectConfig::removeSelectedExcludedApplications()
+{
+    QList<int> indices;
+    for (QTreeWidgetItem *item : m_ui.excludedApplicationsTreeWidget->selectedItems()) {
+        indices.append(item->data(0, Qt::UserRole).toInt());
+    }
+    std::sort(indices.begin(), indices.end(), std::greater<int>());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    for (int index : indices) {
+        if (index >= 0 && index < m_excludedApplications.size()) {
+            m_excludedApplications.removeAt(index);
+        }
+    }
+    if (!indices.isEmpty()) {
+        rebuildExcludedApplications();
+        markAsChanged();
+        sendPreview();
+    }
+}
+
 void BaClickFxEffectConfig::rebuildOutputScaleEditors()
 {
     auto *layout = m_ui.outputScaleGroupBox->findChild<QVBoxLayout *>(QStringLiteral("outputScaleLayout"));
@@ -409,6 +645,16 @@ void BaClickFxEffectConfig::load()
     rebuildOutputScaleEditors();
     refreshOutputMetadata();
 
+    m_ui.desktopOnlyCheckBox->setChecked(
+        conf.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault));
+    m_ui.excludeApplicationsCheckBox->setChecked(
+        conf.readEntry(def::kExcludeApplications, def::kExcludeApplicationsDefault));
+    m_excludedApplications = baclickfx::parseExcludedApplications(
+        conf.readEntry(def::kExcludedApplications, QByteArray()));
+    rebuildExcludedApplications();
+    m_ui.excludedApplicationsGroupBox->setVisible(
+        m_ui.excludeApplicationsCheckBox->isChecked());
+
     m_ui.enableTrailCheckBox->setChecked(
         conf.readEntry(def::kEnableTrail, def::kEnableTrailDefault));
     m_ui.alwaysTrailCheckBox->setChecked(
@@ -450,6 +696,15 @@ void BaClickFxEffectConfig::save()
                     QJsonDocument(overrides).toJson(QJsonDocument::Compact));
     conf.writeEntry(def::kOutputScaleEnabled, m_ui.showOutputScaleCheckBox->isChecked());
 
+    conf.writeEntry(def::kDesktopOnly, m_ui.desktopOnlyCheckBox->isChecked());
+    conf.writeEntry(def::kExcludeApplications,
+                    m_ui.excludeApplicationsCheckBox->isChecked());
+    conf.writeEntry(def::kExcludedApplications,
+                    baclickfx::serializeExcludedApplications(m_excludedApplications));
+    // 新格式直接占用稳定键名；旧实验键不迁移，保存时一并清理。
+    conf.deleteEntry(def::kLegacyExcludedApplicationRules);
+    conf.deleteEntry(def::kLegacyExcludedApplicationRulesV2);
+
     conf.writeEntry(def::kEnableTrail, m_ui.enableTrailCheckBox->isChecked());
     conf.writeEntry(def::kAlwaysTrail, m_ui.alwaysTrailCheckBox->isChecked());
     conf.writeEntry(def::kEnableDistanceEmitter,
@@ -488,8 +743,14 @@ void BaClickFxEffectConfig::dispatchPreview()
                                m_ui.timeScaleSlider->value() / double(kSliderScale)},
                               {QStringLiteral("globalScale"),
                                m_ui.globalScaleSlider->value() / double(kSliderScale)},
+                              {QStringLiteral("desktopOnly"),
+                               m_ui.desktopOnlyCheckBox->isChecked()},
+                              {QStringLiteral("excludeApplications"),
+                               m_ui.excludeApplicationsCheckBox->isChecked()},
                               {QStringLiteral("outputScaleEnabled"),
                                m_ui.showOutputScaleCheckBox->isChecked()}};
+    preview.insert(QStringLiteral("excludedApplications"),
+                   baclickfx::excludedApplicationsToJson(m_excludedApplications));
     QJsonObject outputOverrides;
     for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
         if (m_outputOverrides.contains(it.key())) {
@@ -516,6 +777,10 @@ void BaClickFxEffectConfig::restorePersistedPreview()
     QJsonObject preview{
         {QStringLiteral("timeScale"), conf.readEntry(def::kTimeScale, def::kTimeScaleDefault)},
         {QStringLiteral("globalScale"), conf.readEntry(def::kGlobalScale, def::kGlobalScaleDefault)},
+        {QStringLiteral("desktopOnly"),
+         conf.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault)},
+        {QStringLiteral("excludeApplications"),
+         conf.readEntry(def::kExcludeApplications, def::kExcludeApplicationsDefault)},
         {QStringLiteral("outputScaleEnabled"),
          conf.readEntry(def::kOutputScaleEnabled, def::kOutputScaleEnabledDefault)},
         {QStringLiteral("enableTrail"), conf.readEntry(def::kEnableTrail, def::kEnableTrailDefault)},
@@ -528,6 +793,10 @@ void BaClickFxEffectConfig::restorePersistedPreview()
         conf.readEntry(def::kOutputScaleOverrides, QByteArray()));
     preview.insert(QStringLiteral("outputScaleOverrides"),
                    overrides.isObject() ? overrides.object() : QJsonObject());
+    preview.insert(QStringLiteral("excludedApplications"),
+                   baclickfx::excludedApplicationsToJson(
+                       baclickfx::parseExcludedApplications(
+                           conf.readEntry(def::kExcludedApplications, QByteArray()))));
     const QString payload = QStringLiteral("preview:")
         + QString::fromUtf8(QJsonDocument(preview).toJson(QJsonDocument::Compact));
     QDBusMessage message = QDBusMessage::createMethodCall(
@@ -567,6 +836,11 @@ void BaClickFxEffectConfig::defaults()
     }
     // Defaults must not destroy and recreate child widgets while KCModule is
     // processing its reset action. The persisted overrides are cleared on save.
+
+    m_ui.desktopOnlyCheckBox->setChecked(def::kDesktopOnlyDefault);
+    m_ui.excludeApplicationsCheckBox->setChecked(def::kExcludeApplicationsDefault);
+    m_excludedApplications.clear();
+    rebuildExcludedApplications();
 
     m_ui.enableTrailCheckBox->setChecked(def::kEnableTrailDefault);
     m_ui.alwaysTrailCheckBox->setChecked(def::kAlwaysTrailDefault);

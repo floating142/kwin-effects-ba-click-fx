@@ -36,20 +36,20 @@ KWin native effect plugins are ABI-bound to `EffectPluginFactory`. Rebuild with 
 Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel cmake extra-cmake-modules kwin libepoxy qt6-base qt6-declarative vulkan-headers
+sudo pacman -S --needed base-devel cmake extra-cmake-modules kservice kwin libepoxy qt6-base qt6-declarative vulkan-headers
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
+sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kf6-kservice-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
 ```
 
 Kubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev qt6-declarative-dev qt6-tools-dev libvulkan-dev
+sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev qt6-declarative-dev qt6-tools-dev libvulkan-dev
 ```
 
 CI and `scripts/verify-release.sh` additionally use `appstream`, `ripgrep` and `ninja-build`.
@@ -70,7 +70,7 @@ JOBS=4 ./install-local.sh --system
 ./install-local.sh --help
 ```
 
-The configuration page provides time scaling, overall scaling, per-display scaling, trail controls, debug logging and repaint-region borders. Unity-authored colors, particle counts, trail width, emission spacing and Bloom parameters remain fixed.
+The configuration page provides time scaling, overall scaling, per-display scaling, desktop-only triggering, application exclusions, trail controls, debug logging and repaint-region borders. To exclude an application, enable **Exclude specified applications**, click **Pick window…**, then select one of its windows; KWin supplies the application identity and the page asks for confirmation before adding it. Wine and Proton windows without a desktop-file identity combine a Lutris UUID or valid Steam App ID with the executable name, allowing a launcher and its game window to be excluded independently. When the launcher supplies no usable ID, the Wine prefix and process command are used instead. Unity-authored colors, particle counts, trail width, emission spacing and Bloom parameters remain fixed.
 
 Remove a system installation with `./uninstall-local.sh --system`; use `--user` for a user installation. Add `--purge-config` to remove saved settings and the enabled state.
 

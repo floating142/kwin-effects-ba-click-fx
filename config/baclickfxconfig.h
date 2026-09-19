@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "applicationfilter.h"
+
 #include <KCModule>
 #include <QHash>
 #include <QPointer>
@@ -37,6 +39,9 @@ private:
     void updateGlobalScaleVisibility();
     void rebuildOutputScaleEditors();
     void refreshOutputMetadata();
+    void rebuildExcludedApplications();
+    void pickExcludedApplication();
+    void removeSelectedExcludedApplications();
     QHash<QString, class QSlider *> m_outputSliders;
     QHash<QString, class QLabel *> m_outputLabels;
     QHash<QString, class QLabel *> m_outputNames;
@@ -50,6 +55,8 @@ private:
     QTimer m_previewDebounce;
     QTimer m_outputRefreshTimeout;
     QPointer<QDBusPendingCallWatcher> m_outputRefreshWatcher;
+    QPointer<QDBusPendingCallWatcher> m_windowPickerWatcher;
+    QVector<baclickfx::ExcludedApplication> m_excludedApplications;
 
     Ui::BaClickFxEffectConfigForm m_ui;
 };

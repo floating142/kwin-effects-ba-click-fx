@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "applicationfilter.h"
 #include "curveutils.h"
 #include "clickinstance.h"
 #include "bloomutils.h"
@@ -42,6 +43,10 @@ private Q_SLOTS:
     void outputScaleUsesUnityOrthographicProjection();
     void outputScaleIdIsStable();
     void outputUuidIsPreferred();
+    void applicationFilterNormalizesAndRoundTrips();
+    void applicationIdentityUsesPriority();
+    void processIdentityPrefersLauncherIds();
+    void processIdentityReadsCurrentProcess();
 };
 
 void LogicTests::scalarCurveClampsAndInterpolates()
@@ -263,6 +268,126 @@ void LogicTests::outputUuidIsPreferred()
     QCOMPARE(baclickfx::preferredOutputScaleId({}, QStringLiteral("V"), QStringLiteral("M"),
                                                 QStringLiteral("S"), QStringLiteral("DP-1")),
              QStringLiteral("V|M|S|DP-1"));
+}
+
+void LogicTests::applicationFilterNormalizesAndRoundTrips()
+{
+    const QVector<baclickfx::ExcludedApplication> source{{
+        .identity = {
+            baclickfx::ApplicationIdentityKind::DesktopFile,
+            QStringLiteral(" Org.KDE.Kate.desktop "),
+            QStringLiteral("ignored"),
+        },
+        .displayName = QStringLiteral("Kate"),
+    }};
+    const QByteArray json = baclickfx::serializeExcludedApplications(source);
+    QVERIFY(json.contains("\"kind\":\"desktop-file\""));
+    QVERIFY(!json.contains("desktopFile"));
+    const auto parsed = baclickfx::parseExcludedApplications(json);
+    QCOMPARE(parsed.size(), 1);
+    QCOMPARE(parsed.front().identity.kind,
+             baclickfx::ApplicationIdentityKind::DesktopFile);
+    QCOMPARE(parsed.front().identity.value, QStringLiteral("org.kde.kate"));
+    QVERIFY(parsed.front().identity.qualifier.isEmpty());
+    QCOMPARE(parsed.front().displayName, QStringLiteral("Kate"));
+
+    // 旧的多字段对象没有 kind/value，必须直接忽略而不是隐式迁移。
+    const QByteArray oldFormat = R"([{"desktopFile":"org.kde.kate","resourceClass":"kate"}])";
+    QVERIFY(baclickfx::parseExcludedApplications(oldFormat).isEmpty());
+    const QByteArray broadLauncher =
+        R"([{"kind":"launcher","value":"lutris:game-one"}])";
+    QVERIFY(baclickfx::parseExcludedApplications(broadLauncher).isEmpty());
+}
+
+void LogicTests::applicationIdentityUsesPriority()
+{
+    const baclickfx::ProcessIdentity lutrisProcess{
+        .launcherId = QStringLiteral("lutris:game-one"),
+        .command = QStringLiteral("c:/games/game-one.exe"),
+        .winePrefix = QStringLiteral("/games/prefix-one"),
+    };
+    const auto desktop = baclickfx::identifyApplication(
+        QStringLiteral("Org.KDE.Kate.desktop"), QStringLiteral("other"), {}, lutrisProcess);
+    QCOMPARE(desktop.kind, baclickfx::ApplicationIdentityKind::DesktopFile);
+    QCOMPARE(desktop.value, QStringLiteral("org.kde.kate"));
+
+    const auto launcher = baclickfx::identifyApplication(
+        {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"),
+        lutrisProcess);
+    QCOMPARE(launcher.kind, baclickfx::ApplicationIdentityKind::Launcher);
+    QCOMPARE(launcher.value, QStringLiteral("lutris:game-one"));
+    QCOMPARE(launcher.qualifier, QStringLiteral("game-one.exe"));
+
+    baclickfx::ProcessIdentity launcherProcess = lutrisProcess;
+    launcherProcess.command = QStringLiteral("c:/launcher/games.exe");
+    const auto gameLauncher = baclickfx::identifyApplication(
+        {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"),
+        launcherProcess);
+    QCOMPARE(gameLauncher.value, launcher.value);
+    QCOMPARE(gameLauncher.qualifier, QStringLiteral("games.exe"));
+
+    baclickfx::ProcessIdentity plainProcess = lutrisProcess;
+    plainProcess.launcherId.clear();
+    const auto process = baclickfx::identifyApplication(
+        {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"),
+        plainProcess);
+    QCOMPARE(process.kind, baclickfx::ApplicationIdentityKind::Process);
+    QCOMPARE(process.value, QStringLiteral("c:/games/game-one.exe"));
+    QCOMPARE(process.qualifier, QStringLiteral("/games/prefix-one"));
+
+    const auto windowClass = baclickfx::identifyApplication(
+        {}, QStringLiteral("Wine-Game"), QStringLiteral("Game-One"));
+    QCOMPARE(windowClass.kind, baclickfx::ApplicationIdentityKind::WindowClass);
+    QCOMPARE(windowClass.value, QStringLiteral("wine-game"));
+    QCOMPARE(windowClass.qualifier, QStringLiteral("game-one"));
+
+    const QVector<baclickfx::ExcludedApplication> rules{{launcher, QStringLiteral("Game")}};
+    QVERIFY(baclickfx::isApplicationExcluded(rules, launcher));
+    QVERIFY(!baclickfx::isApplicationExcluded(rules, gameLauncher));
+    QVERIFY(!baclickfx::isApplicationExcluded(rules, process));
+}
+
+void LogicTests::processIdentityPrefersLauncherIds()
+{
+    QByteArray commandLine("C:\\Games\\Game.exe");
+    commandLine.append('\0');
+    commandLine.append("--fullscreen");
+
+    QByteArray lutrisEnvironment("SteamAppId=default");
+    lutrisEnvironment.append('\0');
+    lutrisEnvironment.append("SteamGameId=default");
+    lutrisEnvironment.append('\0');
+    lutrisEnvironment.append("LUTRIS_GAME_UUID=253781D3-8B1A-4C75-BD22-7C5EF9DED22B");
+    lutrisEnvironment.append('\0');
+    lutrisEnvironment.append("WINEPREFIX=/games/prefix/");
+    const auto lutris = baclickfx::processIdentityFromData(commandLine, lutrisEnvironment);
+    QCOMPARE(lutris.launcherId,
+             QStringLiteral("lutris:253781d3-8b1a-4c75-bd22-7c5ef9ded22b"));
+    QCOMPARE(lutris.command, QStringLiteral("c:/games/game.exe"));
+    QCOMPARE(lutris.winePrefix, QStringLiteral("/games/prefix"));
+
+    QByteArray steamEnvironment("SteamAppId=1672970");
+    steamEnvironment.append('\0');
+    steamEnvironment.append("SteamGameId=1672970");
+    const auto steam = baclickfx::processIdentityFromData(commandLine, steamEnvironment);
+    QCOMPARE(steam.launcherId, QStringLiteral("steam:1672970"));
+
+    QByteArray fallbackEnvironment("SteamAppId=default");
+    fallbackEnvironment.append('\0');
+    fallbackEnvironment.append("SteamGameId=default");
+    fallbackEnvironment.append('\0');
+    fallbackEnvironment.append("WINEPREFIX=/games/fallback");
+    const auto fallback = baclickfx::processIdentityFromData(
+        commandLine, fallbackEnvironment);
+    QVERIFY(fallback.launcherId.isEmpty());
+    QCOMPARE(fallback.winePrefix, QStringLiteral("/games/fallback"));
+}
+
+void LogicTests::processIdentityReadsCurrentProcess()
+{
+    const baclickfx::ProcessIdentity identity = baclickfx::processIdentity(
+        QCoreApplication::applicationPid());
+    QVERIFY(!identity.command.isEmpty());
 }
 
 QTEST_APPLESS_MAIN(LogicTests)

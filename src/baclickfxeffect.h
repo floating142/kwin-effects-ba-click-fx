@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "applicationfilter.h"
 #include "baclickfxdefaults.h"
 #include "clickinstance.h"
 #include "curveutils.h"
@@ -19,6 +20,7 @@
 #include <QHash>
 #include <QPointF>
 #include <QJsonObject>
+#include <QUuid>
 
 #include <chrono>
 #include <cstdint>
@@ -28,6 +30,8 @@ Q_DECLARE_LOGGING_CATEGORY(KWIN_BA_CLICK_FX)
 
 namespace KWin
 {
+
+class Window;
 
 /** KWin effect that renders the ported FX_Touch particle and trail systems. */
 class BaClickFxEffect : public Effect
@@ -131,6 +135,15 @@ private:
     /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
     int liveDistanceParticles(std::uint64_t dragSerial) const;
 
+    /// 按 KWin 输入语义返回 `pos` 处最上层可接收输入的窗口。
+    Window *inputWindowAt(const QPointF &pos) const;
+
+    /// 返回当前触发范围与应用排除规则是否允许 `pos` 处的特效。
+    bool isEffectAllowedAt(const QPointF &pos) const;
+
+    /// 检查窗口及其 transient 主窗口是否命中应用排除规则。
+    bool isWindowExcluded(const Window *window) const;
+
     baclickfx::defaults::LogLevel m_logLevel = baclickfx::defaults::kLogLevelDefault;
     bool m_debugDamage = false;
     bool m_dragging = false;
@@ -149,6 +162,13 @@ private:
     bool m_enableTrail = true;
     bool m_alwaysTrail = false;
     bool m_enableDistanceEmitter = true;
+    bool m_desktopOnly = baclickfx::defaults::kDesktopOnlyDefault;
+    bool m_excludeApplications = baclickfx::defaults::kExcludeApplicationsDefault;
+    QVector<baclickfx::ExcludedApplication> m_excludedApplications;
+    // /proc 身份按 KWin 窗口 UUID 缓存，避免 Always Trail 的移动事件重复读文件。
+    mutable QHash<QUuid, baclickfx::ProcessIdentity> m_processIdentityCache;
+    // 按下时固化本次手势的过滤结果，直到松开左键。
+    bool m_pressSuppressed = false;
 
     // 当前参数表仅供之后创建的实例使用；活动实例持有自己的参数快照。
     baclickfx::SubsystemMap m_subsystems;

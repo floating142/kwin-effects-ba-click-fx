@@ -15,7 +15,7 @@ jobs:
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          appstream base-devel cmake extra-cmake-modules git github-cli kwin
+          appstream base-devel cmake extra-cmake-modules git github-cli kservice kwin
           libepoxy ninja qt6-base qt6-declarative ripgrep vulkan-headers
 
       - name: Check out release tag

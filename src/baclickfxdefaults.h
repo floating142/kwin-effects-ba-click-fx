@@ -42,6 +42,15 @@ inline constexpr const char *kAlwaysTrail = "AlwaysTrail";
 /// 距离发射器开关的配置键。
 inline constexpr const char *kEnableDistanceEmitter = "EnableDistanceEmitter";
 
+/// 仅在桌面（壁纸层）上点击时触发特效的配置键。
+inline constexpr const char *kDesktopOnly = "DesktopOnly";
+
+/// 应用排除规则的开关与 JSON 列表。
+inline constexpr const char *kExcludeApplications = "ExcludeApplications";
+inline constexpr const char *kExcludedApplications = "ExcludedApplications";
+inline constexpr const char *kLegacyExcludedApplicationRules = "ExcludedApplicationRules";
+inline constexpr const char *kLegacyExcludedApplicationRulesV2 = "ExcludedApplicationRulesV2";
+
 /** @} */
 
 /**
@@ -91,6 +100,12 @@ inline constexpr bool kAlwaysTrailDefault = false;
 
 /// 默认启用距离发射器。
 inline constexpr bool kEnableDistanceEmitterDefault = true;
+
+/// 默认不限制点击来源，任意位置点击均触发特效。
+inline constexpr bool kDesktopOnlyDefault = false;
+
+/// 默认不排除任何应用。
+inline constexpr bool kExcludeApplicationsDefault = false;
 
 /** @} */
 

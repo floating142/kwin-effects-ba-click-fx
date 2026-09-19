@@ -10,7 +10,9 @@ build_dir="${1:-build/verify}"
 required_files=(
   LICENSE README.md README.en.md TODO.md TESTING.md CMakeLists.txt
   po/zh_CN/kwin_ba_click_fx_config.po
+  po/zh_TW/kwin_ba_click_fx_config.po
   src/metadata.json src/baclickfxeffect.cpp src/baclickfxeffect.h
+  src/applicationfilter.cpp src/applicationfilter.h
   src/gpurenderer.cpp src/gpurenderer.h src/clickinstance.cpp src/clickinstance.h
   src/trailstream.cpp src/trailstream.h src/curveutils.cpp src/curveutils.h
   src/diagnostics.cpp src/diagnostics.h src/damageutils.cpp src/damageutils.h
