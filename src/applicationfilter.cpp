@@ -91,10 +91,20 @@ ApplicationIdentity normalizeIdentity(ApplicationIdentity identity)
     case ApplicationIdentityKind::Launcher:
         identity.value = identity.value.trimmed().toCaseFolded();
         identity.qualifier = processComponent(identity.qualifier);
+        // Steam App ID 是稳定安装身份；LUTRIS_GAME_UUID 是每次运行生成的
+        // 临时 UUID，旧的 lutris:* 规则必须直接失效。
+        if (!identity.value.startsWith(QLatin1String("steam:"))) {
+            identity = {};
+        }
         break;
     case ApplicationIdentityKind::Process:
         identity.value = normalizeProcessCommand(identity.value);
         identity.qualifier = normalizeWinePrefix(identity.qualifier);
+        if (!identity.qualifier.isEmpty()) {
+            // Wine 路径可能包含会随启动器升级变化的目录，只保留稳定的
+            // executable basename，并以 WINEPREFIX 区分不同游戏安装。
+            identity.value = processComponent(identity.value);
+        }
         break;
     case ApplicationIdentityKind::WindowClass:
         identity.value = normalizeApplicationId(identity.value);
@@ -149,19 +159,13 @@ ProcessIdentity processIdentityFromData(const QByteArray &commandLine,
         }
     }
 
-    const QString lutrisUuid = normalizedEnvironmentValue(
-        environment, QByteArrayLiteral("LUTRIS_GAME_UUID"));
-    if (isUsefulLauncherValue(lutrisUuid)) {
-        identity.launcherId = QStringLiteral("lutris:%1").arg(lutrisUuid.toCaseFolded());
-    } else {
-        const QString steamAppId = normalizedEnvironmentValue(
-            environment, QByteArrayLiteral("SteamAppId"));
-        const QString steamGameId = normalizedEnvironmentValue(
-            environment, QByteArrayLiteral("SteamGameId"));
-        const QString steamId = isUsefulLauncherValue(steamAppId) ? steamAppId : steamGameId;
-        if (isUsefulLauncherValue(steamId)) {
-            identity.launcherId = QStringLiteral("steam:%1").arg(steamId.toCaseFolded());
-        }
+    const QString steamAppId = normalizedEnvironmentValue(
+        environment, QByteArrayLiteral("SteamAppId"));
+    const QString steamGameId = normalizedEnvironmentValue(
+        environment, QByteArrayLiteral("SteamGameId"));
+    const QString steamId = isUsefulLauncherValue(steamAppId) ? steamAppId : steamGameId;
+    if (isUsefulLauncherValue(steamId)) {
+        identity.launcherId = QStringLiteral("steam:%1").arg(steamId.toCaseFolded());
     }
 
     identity.winePrefix = normalizeWinePrefix(normalizedEnvironmentValue(

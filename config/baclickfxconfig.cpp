@@ -52,14 +52,6 @@ namespace
 // QSlider 仅保存整数，因此小数配置统一缩放 100 倍。
 constexpr int kSliderScale = 100;
 
-QString shortenedId(const QString &value)
-{
-    constexpr qsizetype visibleCharacters = 8;
-    return value.size() > visibleCharacters
-        ? value.first(visibleCharacters) + QChar(0x2026)
-        : value;
-}
-
 QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
 {
     const baclickfx::ApplicationIdentity &identity = application.identity;
@@ -67,18 +59,9 @@ QString applicationIdentifier(const baclickfx::ExcludedApplication &application)
     case baclickfx::ApplicationIdentityKind::DesktopFile:
         return i18n("Desktop file · %1", identity.value);
     case baclickfx::ApplicationIdentityKind::Launcher: {
-        const QString provider = identity.value.section(u':', 0, 0);
         const QString id = identity.value.section(u':', 1);
         const QString component = identity.qualifier;
-        if (provider == QLatin1String("lutris")) {
-            return i18n("Lutris · %1", QStringLiteral("%1 · %2")
-                        .arg(shortenedId(id), component));
-        }
-        if (provider == QLatin1String("steam")) {
-            return i18n("Steam · %1", QStringLiteral("%1 · %2").arg(id, component));
-        }
-        return i18n("Launcher · %1", QStringLiteral("%1 · %2")
-                    .arg(shortenedId(identity.value), component));
+        return i18n("Steam · %1", QStringLiteral("%1 · %2").arg(id, component));
     }
     case baclickfx::ApplicationIdentityKind::Process:
         return i18n("Process · %1", identity.value.section(u'/', -1));

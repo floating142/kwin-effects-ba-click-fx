@@ -45,7 +45,7 @@ private Q_SLOTS:
     void outputUuidIsPreferred();
     void applicationFilterNormalizesAndRoundTrips();
     void applicationIdentityUsesPriority();
-    void processIdentityPrefersLauncherIds();
+    void processIdentityIgnoresEphemeralLutrisId();
     void processIdentityReadsCurrentProcess();
 };
 
@@ -295,30 +295,30 @@ void LogicTests::applicationFilterNormalizesAndRoundTrips()
     const QByteArray oldFormat = R"([{"desktopFile":"org.kde.kate","resourceClass":"kate"}])";
     QVERIFY(baclickfx::parseExcludedApplications(oldFormat).isEmpty());
     const QByteArray broadLauncher =
-        R"([{"kind":"launcher","value":"lutris:game-one"}])";
+        R"([{"kind":"launcher","value":"lutris:random-run-id","qualifier":"game.exe"}])";
     QVERIFY(baclickfx::parseExcludedApplications(broadLauncher).isEmpty());
 }
 
 void LogicTests::applicationIdentityUsesPriority()
 {
-    const baclickfx::ProcessIdentity lutrisProcess{
-        .launcherId = QStringLiteral("lutris:game-one"),
+    const baclickfx::ProcessIdentity steamProcess{
+        .launcherId = QStringLiteral("steam:1672970"),
         .command = QStringLiteral("c:/games/game-one.exe"),
         .winePrefix = QStringLiteral("/games/prefix-one"),
     };
     const auto desktop = baclickfx::identifyApplication(
-        QStringLiteral("Org.KDE.Kate.desktop"), QStringLiteral("other"), {}, lutrisProcess);
+        QStringLiteral("Org.KDE.Kate.desktop"), QStringLiteral("other"), {}, steamProcess);
     QCOMPARE(desktop.kind, baclickfx::ApplicationIdentityKind::DesktopFile);
     QCOMPARE(desktop.value, QStringLiteral("org.kde.kate"));
 
     const auto launcher = baclickfx::identifyApplication(
         {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"),
-        lutrisProcess);
+        steamProcess);
     QCOMPARE(launcher.kind, baclickfx::ApplicationIdentityKind::Launcher);
-    QCOMPARE(launcher.value, QStringLiteral("lutris:game-one"));
+    QCOMPARE(launcher.value, QStringLiteral("steam:1672970"));
     QCOMPARE(launcher.qualifier, QStringLiteral("game-one.exe"));
 
-    baclickfx::ProcessIdentity launcherProcess = lutrisProcess;
+    baclickfx::ProcessIdentity launcherProcess = steamProcess;
     launcherProcess.command = QStringLiteral("c:/launcher/games.exe");
     const auto gameLauncher = baclickfx::identifyApplication(
         {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"),
@@ -326,13 +326,13 @@ void LogicTests::applicationIdentityUsesPriority()
     QCOMPARE(gameLauncher.value, launcher.value);
     QCOMPARE(gameLauncher.qualifier, QStringLiteral("games.exe"));
 
-    baclickfx::ProcessIdentity plainProcess = lutrisProcess;
+    baclickfx::ProcessIdentity plainProcess = steamProcess;
     plainProcess.launcherId.clear();
     const auto process = baclickfx::identifyApplication(
         {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"),
         plainProcess);
     QCOMPARE(process.kind, baclickfx::ApplicationIdentityKind::Process);
-    QCOMPARE(process.value, QStringLiteral("c:/games/game-one.exe"));
+    QCOMPARE(process.value, QStringLiteral("game-one.exe"));
     QCOMPARE(process.qualifier, QStringLiteral("/games/prefix-one"));
 
     const auto windowClass = baclickfx::identifyApplication(
@@ -347,7 +347,7 @@ void LogicTests::applicationIdentityUsesPriority()
     QVERIFY(!baclickfx::isApplicationExcluded(rules, process));
 }
 
-void LogicTests::processIdentityPrefersLauncherIds()
+void LogicTests::processIdentityIgnoresEphemeralLutrisId()
 {
     QByteArray commandLine("C:\\Games\\Game.exe");
     commandLine.append('\0');
@@ -361,10 +361,14 @@ void LogicTests::processIdentityPrefersLauncherIds()
     lutrisEnvironment.append('\0');
     lutrisEnvironment.append("WINEPREFIX=/games/prefix/");
     const auto lutris = baclickfx::processIdentityFromData(commandLine, lutrisEnvironment);
-    QCOMPARE(lutris.launcherId,
-             QStringLiteral("lutris:253781d3-8b1a-4c75-bd22-7c5ef9ded22b"));
+    QVERIFY(lutris.launcherId.isEmpty());
     QCOMPARE(lutris.command, QStringLiteral("c:/games/game.exe"));
     QCOMPARE(lutris.winePrefix, QStringLiteral("/games/prefix"));
+    const auto lutrisIdentity = baclickfx::identifyApplication(
+        {}, QStringLiteral("steam_app_default"), QStringLiteral("steam_app_default"), lutris);
+    QCOMPARE(lutrisIdentity.kind, baclickfx::ApplicationIdentityKind::Process);
+    QCOMPARE(lutrisIdentity.value, QStringLiteral("game.exe"));
+    QCOMPARE(lutrisIdentity.qualifier, QStringLiteral("/games/prefix"));
 
     QByteArray steamEnvironment("SteamAppId=1672970");
     steamEnvironment.append('\0');

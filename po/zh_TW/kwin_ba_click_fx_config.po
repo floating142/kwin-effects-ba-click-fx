@@ -135,14 +135,8 @@ msgstr "識別碼"
 msgid "Desktop file · %1"
 msgstr "桌面項目 · %1"
 
-msgid "Lutris · %1"
-msgstr "Lutris · %1"
-
 msgid "Steam · %1"
 msgstr "Steam · %1"
-
-msgid "Launcher · %1"
-msgstr "啟動器 · %1"
 
 msgid "Process · %1"
 msgstr "行程 · %1"
