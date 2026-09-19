@@ -265,7 +265,7 @@ SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outp
         s.alphaKeys = ScalarCurve(kTrailAlphaKeys);
     }
 
-    // 参考 Unity 工程的正交相机 orthographicSize = 1.35，垂直视锥范围为
+    // Unity 固定 UI Pass 的正交相机 orthographicSize = 1.0，垂直视锥范围为
     // 2 * kUnityOrthographicSize 个世界单位。因此世界到屏幕的投影比例为：
     // outputHeight / (2 * orthographicSize)，再应用用户的整体尺寸缩放。
     const double height = outputHeightPx > 0.0 ? outputHeightPx : kReferenceHeightPx;

@@ -16,11 +16,11 @@ namespace baclickfx {
 /**
  * Unity 世界单位在 1080 像素参考高度下对应的逻辑像素数。
  *
- * 参考 Unity 工程的正交相机使用 `orthographicSize = 1.35`。
+ * Unity 固定 UI Pass 与验证 Capture 使用 `orthographicSize = 1.0`。
  * 实际输出换算由 `Subsystem::worldUnitPx` 再乘 `outputHeight / 1080`，最终保持
  * Unity 相机的世界到屏幕投影比例。
  */
-inline constexpr double kUnityOrthographicSize = 1.35;
+inline constexpr double kUnityOrthographicSize = 1.0;
 
 /// Unity 参考分辨率的逻辑高度，用于按输出高度归一化尺寸。
 inline constexpr double kReferenceHeightPx = 1080.0;
