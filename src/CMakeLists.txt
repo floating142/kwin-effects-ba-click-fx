@@ -14,6 +14,14 @@ if(KWin_VERSION VERSION_LESS "6.7.0")
     target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME)
 endif()
 
+# KWin 6.8 changed Effect::paintScreen and EffectsHandler::paintScreen to return
+# [[nodiscard]] bool (false signals a GPU reset / failed paint). Guard the
+# override and the underlying effects->paintScreen() call so the same source
+# tree still builds against 6.6/6.7, where the method returned void.
+if(KWin_VERSION VERSION_GREATER_EQUAL "6.8.0")
+    target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL)
+endif()
+
 # KWIN_EFFECT_FACTORY_* 宏展开后才包含 Q_OBJECT。将这些宏注册给 AutoMoc，确保
 # main.cpp 能够生成并包含对应的元对象代码。
 set_property(TARGET kwin4_effect_ba_click_fx PROPERTY AUTOMOC_MACRO_NAMES

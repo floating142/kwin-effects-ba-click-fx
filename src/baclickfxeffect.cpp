@@ -1206,15 +1206,31 @@ void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,
     resetFrameStats();
 }
 
+#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
+[[nodiscard]] bool BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                                                int mask, const Region &deviceRegion, LogicalOutput *screen)
+#else
 void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
                                 int mask, const Region &deviceRegion, LogicalOutput *screen)
+#endif
 {
-    // 先让底下的窗口/桌面画完，粒子是叠在最上面的。
+    // 先让底下的窗口/桌面画完，粒子是叠在最上面的。KWin 6.8 起该调用返回绘制是否
+    // 成功（false 表示 GPU reset 等失败），失败时立即停止本帧渲染。
+#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
+    if (!effects->paintScreen(renderTarget, viewport, mask, deviceRegion, screen)) {
+        return false;
+    }
+#else
     effects->paintScreen(renderTarget, viewport, mask, deviceRegion, screen);
+#endif
 
     if (m_instances.empty() && m_bursts.empty() && m_trails.empty()) {
         ++m_skipNoActivity;
+#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
+        return true;
+#else
         return;
+#endif
     }
 
     // Shader 和纹理需要有效 OpenGL 上下文，因此在首次绘制时初始化。失败后不在每帧
@@ -1230,7 +1246,11 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
     }
     if (!m_gpuReady) {
         ++m_skipGpu;
+#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
+        return true;
+#else
         return;
+#endif
     }
 
     if (!logsFrames()) {
@@ -1238,7 +1258,11 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
         if (m_debugDamage) {
             drawDebugDamage(renderTarget, viewport);
         }
+#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
+        return true;
+#else
         return;
+#endif
     }
 
     // 帧统计级别下测量 paintScreen() 的 CPU 墙钟时间。
@@ -1250,6 +1274,9 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
     if (m_debugDamage) {
         drawDebugDamage(renderTarget, viewport);
     }
+#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
+    return true;
+#endif
 }
 
 void BaClickFxEffect::drawDebugDamage(const RenderTarget &renderTarget,
