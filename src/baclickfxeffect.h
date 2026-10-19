@@ -53,8 +53,13 @@ public:
     void prePaintScreen(ScreenPrePaintData &data) override;
 #endif
     /// 绘制底层场景后，将粒子和拖尾合成到当前输出。
+#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
+    [[nodiscard]] bool paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                                   int mask, const Region &deviceRegion, LogicalOutput *screen) override;
+#else
     void paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
                      int mask, const Region &deviceRegion, LogicalOutput *screen) override;
+#endif
     void postPaintScreen() override;
 
 #ifndef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
