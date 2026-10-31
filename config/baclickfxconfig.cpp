@@ -148,6 +148,13 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
                                      int(def::kGlobalScaleMax * kSliderScale));
 
     // 所有可编辑控件变化时由 KCModule 更新「应用」按钮状态。
+    connect(m_ui.enableClickCheckBox, &QCheckBox::toggled,
+            this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.enableClickCheckBox, &QCheckBox::toggled, this, [this] { sendPreview(); });
+    connect(m_ui.disableOnFullscreenCheckBox, &QCheckBox::toggled,
+            this, &BaClickFxEffectConfig::markAsChanged);
+    connect(m_ui.disableOnFullscreenCheckBox, &QCheckBox::toggled,
+            this, [this] { sendPreview(); });
     connect(m_ui.desktopOnlyCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.desktopOnlyCheckBox, &QCheckBox::toggled,
@@ -628,6 +635,10 @@ void BaClickFxEffectConfig::load()
     rebuildOutputScaleEditors();
     refreshOutputMetadata();
 
+    m_ui.enableClickCheckBox->setChecked(
+        conf.readEntry(def::kEnableClick, def::kEnableClickDefault));
+    m_ui.disableOnFullscreenCheckBox->setChecked(
+        conf.readEntry(def::kDisableOnFullscreen, def::kDisableOnFullscreenDefault));
     m_ui.desktopOnlyCheckBox->setChecked(
         conf.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault));
     m_ui.excludeApplicationsCheckBox->setChecked(
@@ -679,6 +690,8 @@ void BaClickFxEffectConfig::save()
                     QJsonDocument(overrides).toJson(QJsonDocument::Compact));
     conf.writeEntry(def::kOutputScaleEnabled, m_ui.showOutputScaleCheckBox->isChecked());
 
+    conf.writeEntry(def::kEnableClick, m_ui.enableClickCheckBox->isChecked());
+    conf.writeEntry(def::kDisableOnFullscreen, m_ui.disableOnFullscreenCheckBox->isChecked());
     conf.writeEntry(def::kDesktopOnly, m_ui.desktopOnlyCheckBox->isChecked());
     conf.writeEntry(def::kExcludeApplications,
                     m_ui.excludeApplicationsCheckBox->isChecked());
@@ -728,6 +741,10 @@ void BaClickFxEffectConfig::dispatchPreview()
                                m_ui.globalScaleSlider->value() / double(kSliderScale)},
                               {QStringLiteral("desktopOnly"),
                                m_ui.desktopOnlyCheckBox->isChecked()},
+                              {QStringLiteral("enableClick"),
+                               m_ui.enableClickCheckBox->isChecked()},
+                              {QStringLiteral("disableOnFullscreen"),
+                               m_ui.disableOnFullscreenCheckBox->isChecked()},
                               {QStringLiteral("excludeApplications"),
                                m_ui.excludeApplicationsCheckBox->isChecked()},
                               {QStringLiteral("outputScaleEnabled"),
@@ -762,6 +779,10 @@ void BaClickFxEffectConfig::restorePersistedPreview()
         {QStringLiteral("globalScale"), conf.readEntry(def::kGlobalScale, def::kGlobalScaleDefault)},
         {QStringLiteral("desktopOnly"),
          conf.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault)},
+        {QStringLiteral("enableClick"),
+         conf.readEntry(def::kEnableClick, def::kEnableClickDefault)},
+        {QStringLiteral("disableOnFullscreen"),
+         conf.readEntry(def::kDisableOnFullscreen, def::kDisableOnFullscreenDefault)},
         {QStringLiteral("excludeApplications"),
          conf.readEntry(def::kExcludeApplications, def::kExcludeApplicationsDefault)},
         {QStringLiteral("outputScaleEnabled"),
@@ -820,6 +841,8 @@ void BaClickFxEffectConfig::defaults()
     // Defaults must not destroy and recreate child widgets while KCModule is
     // processing its reset action. The persisted overrides are cleared on save.
 
+    m_ui.enableClickCheckBox->setChecked(def::kEnableClickDefault);
+    m_ui.disableOnFullscreenCheckBox->setChecked(def::kDisableOnFullscreenDefault);
     m_ui.desktopOnlyCheckBox->setChecked(def::kDesktopOnlyDefault);
     m_ui.excludeApplicationsCheckBox->setChecked(def::kExcludeApplicationsDefault);
     m_excludedApplications.clear();

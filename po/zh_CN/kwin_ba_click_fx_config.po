@@ -108,11 +108,23 @@ msgstr "启用显示器独立缩放"
 msgid "Reset to 1.00"
 msgstr "恢复为 1.00"
 
-msgid "Only trigger on desktop clicks"
-msgstr "仅在点击桌面时触发"
+msgid "Enable click effect"
+msgstr "启用点击效果"
 
-msgid "Restrict the effect to clicks on the desktop background (wallpaper). Clicks on windows, panels, and other UI elements won't trigger it."
-msgstr "仅当点击桌面背景（壁纸）时触发特效；点击窗口、面板或其他界面元素时不会触发。"
+msgid "Play the click burst on mouse press. The trail and distance particles are not affected."
+msgstr "按下鼠标时播放点击迸发；不影响拖尾和沿途小三角。"
+
+msgid "Disable trail and click effect on fullscreen windows"
+msgstr "全屏时禁用拖尾和点击效果"
+
+msgid "Skip the effect when the window under the pointer is fullscreen."
+msgstr "指针下的窗口全屏时跳过特效。"
+
+msgid "Only show effect on desktop"
+msgstr "仅在桌面显示特效"
+
+msgid "Restrict the whole effect, including the trail, to the desktop background (wallpaper). Windows, panels and other UI elements won't trigger it."
+msgstr "整套特效（包括拖尾）仅在桌面背景（壁纸）上生效；窗口、面板和其他界面元素上不会触发。"
 
 msgid "Exclude specified applications"
 msgstr "排除指定应用"
