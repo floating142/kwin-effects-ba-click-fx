@@ -119,13 +119,8 @@ private:
      */
     double outputHeightForPos(const QPointF &pos) const;
 
-    /**
-     * 确保子系统参数按指定输出高度换算。
-     *
-     * 参数在原对象中重建以保持成员地址稳定；跨越不同高度的输出时，活动粒子同步
-     * 使用新输出尺度。
-     */
-    void ensureSubsystemsForHeight(double heightPx);
+    // 当前参数表对应的输出；仅在创建新实例或拖尾会话时刷新。
+    void refreshSubsystems(const QPointF &pos);
     double outputScaleForPos(const QPointF &pos) const;
 
     /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
@@ -149,8 +144,6 @@ private:
     double m_globalScale = 1.0;
     QJsonObject m_outputScaleOverrides;
     bool m_outputScaleEnabled = baclickfx::defaults::kOutputScaleEnabledDefault;
-    // 当前参数表对应的输出逻辑高度；0 表示尚未构建。
-    double m_subsystemHeightPx = 0.0;
     // Ring4 粒子上限作用于单次按下；0 保留为未关联会话。
     std::uint64_t m_dragSerial = 0;
 
@@ -158,6 +151,8 @@ private:
     bool m_enableTrail = true;
     bool m_alwaysTrail = false;
     bool m_enableDistanceEmitter = true;
+    bool m_enableClick = baclickfx::defaults::kEnableClickDefault;
+    bool m_disableOnFullscreen = baclickfx::defaults::kDisableOnFullscreenDefault;
     bool m_desktopOnly = baclickfx::defaults::kDesktopOnlyDefault;
     bool m_excludeApplications = baclickfx::defaults::kExcludeApplicationsDefault;
     QVector<baclickfx::ExcludedApplication> m_excludedApplications;

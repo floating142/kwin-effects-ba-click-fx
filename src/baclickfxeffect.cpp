@@ -275,6 +275,9 @@ void BaClickFxEffect::loadConfig()
     m_alwaysTrail = group.readEntry(def::kAlwaysTrail, def::kAlwaysTrailDefault);
     m_enableDistanceEmitter = m_enableTrail
         && group.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault);
+    m_enableClick = group.readEntry(def::kEnableClick, def::kEnableClickDefault);
+    m_disableOnFullscreen = group.readEntry(def::kDisableOnFullscreen,
+                                             def::kDisableOnFullscreenDefault);
     m_desktopOnly = group.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault);
     m_excludeApplications = group.readEntry(def::kExcludeApplications,
                                              def::kExcludeApplicationsDefault);
@@ -294,8 +297,7 @@ void BaClickFxEffect::loadConfig()
 
     // Instances own a snapshot of their visual parameters. Keep them alive so a
     // reconfigure affects only effects spawned afterwards.
-    m_subsystemHeightPx = 0.0;
-    ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
+    refreshSubsystems(effects->cursorPos());
 
     if (logsVerbose()) {
         qCInfo(KWIN_BA_CLICK_FX) << "配置已重载 timeScale" << m_timeScale
@@ -366,15 +368,11 @@ double BaClickFxEffect::outputScaleForPos(const QPointF &pos) const
     return baclickfx::defaults::kGlobalScaleDefault;
 }
 
-void BaClickFxEffect::ensureSubsystemsForHeight(double heightPx)
+void BaClickFxEffect::refreshSubsystems(const QPointF &pos)
 {
-    const double h = heightPx > 0.0 ? heightPx : baclickfx::kReferenceHeightPx;
-    if (std::abs(h - m_subsystemHeightPx) < 0.5) {
-        return;
-    }
-    m_subsystemHeightPx = h;
-    // 就地重建保持 Subsystem 成员地址稳定；曲线视图仍指向静态数据。
-    m_subsystems = baclickfx::buildSubsystemMap(m_timeScale, m_globalScale, h);
+    // 每次创建实例或拖尾会话都按所在输出重建，避免跨屏后沿用旧高度或逐屏缩放。
+    m_subsystems = baclickfx::buildSubsystemMap(m_timeScale, outputScaleForPos(pos),
+                                                outputHeightForPos(pos));
 }
 
 bool BaClickFxEffect::isActive() const
@@ -401,12 +399,15 @@ QString BaClickFxEffect::debug(const QString &parameter) const
     }
     const QString status = QStringLiteral(
         "build=%1 logLevel=%2 debugDamage=%3 gpuReady=%4 active=%5 "
-        "desktopOnly=%6 excludeApplications=%7 excludedApplicationCount=%8")
+        "enableClick=%6 disableOnFullscreen=%7 desktopOnly=%8 "
+        "excludeApplications=%9 excludedApplicationCount=%10")
         .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
         .arg(int(m_logLevel))
         .arg(m_debugDamage)
         .arg(m_gpuReady)
         .arg(isActive())
+        .arg(m_enableClick)
+        .arg(m_disableOnFullscreen)
         .arg(m_desktopOnly)
         .arg(m_excludeApplications)
         .arg(m_excludedApplications.size());
@@ -448,14 +449,16 @@ QString BaClickFxEffect::debug(const QString &parameter) const
                               "log_level=%3 gpu_ready=%4 active=%5 outputs=\"%6\" "
                               "asset_root=\"%7\" shader_root=\"%8\" %9 "
                               "skip_no_activity=%10 skip_no_damage=%11 skip_gpu=%12 "
-                              "skip_target=%13 skip_import=%14 desktop_only=%15 "
-                              "exclude_applications=%16 excluded_application_count=%17")
+                              "skip_target=%13 skip_import=%14 enable_click=%15 "
+                              "disable_on_fullscreen=%16 desktop_only=%17 "
+                              "exclude_applications=%18 excluded_application_count=%19")
             .arg(QStringLiteral(BA_CLICK_FX_BUILD_ID))
             .arg(QStringLiteral(BA_CLICK_FX_KWIN_VERSION))
             .arg(int(m_logLevel)).arg(m_gpuReady).arg(isActive())
             .arg(outputs.join(QLatin1Char(','))).arg(assetRoot).arg(shaderRoot)
             .arg(m_gpu.diagnosticStatus()).arg(m_skipNoActivity).arg(m_skipNoDamage)
             .arg(m_skipGpu).arg(m_skipTarget).arg(m_skipImport)
+            .arg(m_enableClick).arg(m_disableOnFullscreen)
             .arg(m_desktopOnly).arg(m_excludeApplications).arg(m_excludedApplications.size());
     }
     return status;
@@ -502,8 +505,13 @@ void BaClickFxEffect::applyPreview(const QJsonObject &obj)
         m_enableDistanceEmitter = m_enableTrail
             && obj.value(QStringLiteral("enableDistanceEmitter")).toBool();
     }
-    m_subsystemHeightPx = 0.0;
-    ensureSubsystemsForHeight(outputHeightForPos(effects->cursorPos()));
+    if (obj.contains(QStringLiteral("enableClick"))) {
+        m_enableClick = obj.value(QStringLiteral("enableClick")).toBool();
+    }
+    if (obj.contains(QStringLiteral("disableOnFullscreen"))) {
+        m_disableOnFullscreen = obj.value(QStringLiteral("disableOnFullscreen")).toBool();
+    }
+    refreshSubsystems(effects->cursorPos());
 }
 
 void BaClickFxEffect::spawn(const QPointF &pos)
@@ -638,7 +646,7 @@ bool BaClickFxEffect::isWindowExcluded(const Window *window) const
 
 bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos) const
 {
-    if (!m_desktopOnly && !m_excludeApplications) {
+    if (!m_desktopOnly && !m_excludeApplications && !m_disableOnFullscreen) {
         return true;
     }
 
@@ -651,6 +659,9 @@ bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos) const
     }
 
     Window *window = inputWindowAt(pos);
+    if (m_disableOnFullscreen && window && window->isFullScreen()) {
+        return false;
+    }
     // X11 桌面窗口具有 Desktop 类型；Wayland layer-shell 背景层由
     // KWin 放入 DesktopLayer。无窗口的输出区域同样是露出的桌面。
     const bool desktop = onOutput
@@ -669,6 +680,7 @@ bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos) const
 
 void BaClickFxEffect::startDrag(const QPointF &pos)
 {
+    refreshSubsystems(pos);
     m_dragging = true;
     m_motionEventsWork = false;
     m_autoTrailSession = false;
@@ -1475,7 +1487,9 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         if (!m_dragging) {
             startDrag(pos);
         }
-        spawn(pos);
+        if (m_enableClick) {
+            spawn(pos);
+        }
         m_autoTrailSession = false;
         m_lastDrag = pos;
         m_trailEmit = pos;

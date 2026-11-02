@@ -128,9 +128,24 @@
 
    <!-- 触发条件 -->
    <item>
+    <widget class="QCheckBox" name="enableClickCheckBox">
+     <property name="text"><string>Enable click effect</string></property>
+     <property name="toolTip"><string>Play the click burst on mouse press. The trail and distance particles are not affected.</string></property>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QCheckBox" name="disableOnFullscreenCheckBox">
+     <property name="text"><string>Disable trail and click effect on fullscreen windows</string></property>
+     <property name="checked"><bool>true</bool></property>
+     <property name="toolTip"><string>Skip the effect when the window under the pointer is fullscreen.</string></property>
+    </widget>
+   </item>
+
+   <item>
     <widget class="QCheckBox" name="desktopOnlyCheckBox">
-     <property name="text"><string>Only trigger on desktop clicks</string></property>
-     <property name="toolTip"><string>Restrict the effect to clicks on the desktop background (wallpaper). Clicks on windows, panels, and other UI elements won't trigger it.</string></property>
+     <property name="text"><string>Only show effect on desktop</string></property>
+     <property name="toolTip"><string>Restrict the whole effect, including the trail, to the desktop background (wallpaper). Windows, panels and other UI elements won't trigger it.</string></property>
     </widget>
    </item>
 

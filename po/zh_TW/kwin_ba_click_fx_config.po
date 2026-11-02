@@ -108,11 +108,23 @@ msgstr "失敗"
 msgid "Generated"
 msgstr "已產生"
 
-msgid "Only trigger on desktop clicks"
-msgstr "僅在點擊桌面時觸發"
+msgid "Enable click effect"
+msgstr "啟用點擊效果"
 
-msgid "Restrict the effect to clicks on the desktop background (wallpaper). Clicks on windows, panels, and other UI elements won't trigger it."
-msgstr "僅當點擊桌面背景（桌布）時觸發效果；點擊視窗、面板或其他介面元素時不會觸發。"
+msgid "Play the click burst on mouse press. The trail and distance particles are not affected."
+msgstr "按下滑鼠時播放點擊迸發；不影響拖尾和沿途小三角。"
+
+msgid "Disable trail and click effect on fullscreen windows"
+msgstr "全螢幕時停用拖尾和點擊效果"
+
+msgid "Skip the effect when the window under the pointer is fullscreen."
+msgstr "指標下的視窗為全螢幕時略過效果。"
+
+msgid "Only show effect on desktop"
+msgstr "僅在桌面顯示效果"
+
+msgid "Restrict the whole effect, including the trail, to the desktop background (wallpaper). Windows, panels and other UI elements won't trigger it."
+msgstr "整套效果（包括拖尾）僅在桌面背景（桌布）上生效；視窗、面板和其他介面元素上不會觸發。"
 
 msgid "Exclude specified applications"
 msgstr "排除指定應用程式"
