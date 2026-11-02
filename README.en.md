@@ -6,7 +6,7 @@ Chinese documentation: [README.md](README.md)
 
 **A KDE Plasma KWin click effect and cursor trail plugin ported parameter by parameter from the Blue Archive Unity UI/FX_Touch effect.**
 
-`kwin-effects-ba-click-fx` recreates the ParticleSystem, TrailRenderer and post-processing parameters from `FX_Touch` in native KWin rendering. Clicks play the center disc, dissolving rings and Ring3 particles; holding the left button while moving creates the Ribbon trail and Ring4 distance-emitter particles. Rendering uses native C++ / OpenGL, a linear RGBA16F scene and Unity PPv2 MXFinalBloom without a scripting runtime.
+`kwin-effects-ba-click-fx` recreates the ParticleSystem, TrailRenderer and post-processing parameters from `FX_Touch` in native KWin rendering. Clicks play the center disc, dissolving rings and Ring3 particles; holding a selected trigger button while moving creates the Ribbon trail and Ring4 distance-emitter particles (left button by default). Rendering uses native C++ / OpenGL, a linear RGBA16F scene and Unity PPv2 MXFinalBloom without a scripting runtime.
 
 ![BA Click FX preview](preview/logo.gif)
 
@@ -72,7 +72,9 @@ JOBS=4 ./install-local.sh --system
 
 The configuration page provides time scaling, overall scaling, per-display scaling, a click-effect toggle, a desktop-only switch, fullscreen suppression, application exclusions, trail controls, debug logging and repaint-region borders. To exclude an application, enable **Exclude specified applications**, click **Pick window…**, then select one of its windows; KWin supplies the application identity and the page asks for confirmation before adding it. Steam games without a desktop-file identity combine a valid App ID with the executable name. Lutris run UUIDs change between launches, so Lutris and other Wine games instead combine the Wine prefix with the executable name. Both forms allow a launcher and its game window to be excluded independently. Unity-authored colors, particle counts, trail width, emission spacing and Bloom parameters remain fixed.
 
-Click animations are enabled by default; fullscreen suppression is off by default. When enabled, fullscreen suppression also stops emission when a held drag enters a fullscreen window. Leaving it starts a new stroke at the current position without connecting across the blocked area. Existing particles and trails fade naturally. Desktop and application eligibility for a held gesture remains determined at mouse press.
+Click animations are enabled by default, with only the left button selected; fullscreen suppression is off by default. Left, right and middle buttons can be enabled in any combination. Each newly pressed selected button plays one click burst; selected buttons share one trail until the last is released. Selecting none disables button triggers while **Always show trail** remains independent. Normal button actions such as context menus and middle-click paste continue to work.
+
+When enabled, fullscreen suppression also stops emission when a held drag enters a fullscreen window. Leaving it starts a new stroke at the current position without connecting across the blocked area. Existing particles and trails fade naturally. Desktop and application eligibility for held trails remains determined at the first selected button press.
 
 Remove a system installation with `./uninstall-local.sh --system`; use `--user` for a user installation. Add `--purge-config` to remove saved settings and the enabled state.
 

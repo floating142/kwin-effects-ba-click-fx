@@ -36,6 +36,8 @@ private:
     void sendPreview();
     void dispatchPreview();
     void restorePersistedPreview();
+    int selectedTriggerButtons() const;
+    void setTriggerButtons(int buttons);
     void updateGlobalScaleVisibility();
     void rebuildOutputScaleEditors();
     void refreshOutputMetadata();

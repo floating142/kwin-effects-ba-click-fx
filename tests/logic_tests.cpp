@@ -9,6 +9,8 @@
 #include "meshprofiles.h"
 #include "pathresampler.h"
 #include "outputscaleutils.h"
+#include "mousebuttonutils.h"
+#include "baclickfxdefaults.h"
 #include "subsystems.h"
 #include "trailstream.h"
 
@@ -47,7 +49,67 @@ private Q_SLOTS:
     void applicationIdentityUsesPriority();
     void processIdentityIgnoresEphemeralLutrisId();
     void processIdentityReadsCurrentProcess();
+    void buttonTriggersDefaultToLeftOnly();
+    void buttonChordKeepsOneGestureUntilLastRelease();
+    void buttonTriggersIgnoreUnsupportedAndEmptySelections();
 };
+
+void LogicTests::buttonTriggersDefaultToLeftOnly()
+{
+    const auto triggers = baclickfx::normalizedTriggerButtons(baclickfx::defaults::kTriggerButtonsDefault);
+    for (auto button : {Qt::RightButton, Qt::MiddleButton, Qt::BackButton}) {
+        const auto event = baclickfx::mouseButtonTransitions(button, Qt::NoButton, triggers);
+        QVERIFY(!event.startsGesture());
+        QCOMPARE(event.pressed, Qt::MouseButtons{});
+    }
+    const auto event = baclickfx::mouseButtonTransitions(Qt::LeftButton, Qt::NoButton, triggers);
+    QVERIFY(event.startsGesture());
+    QCOMPARE(event.pressed, Qt::MouseButtons(Qt::LeftButton));
+}
+
+void LogicTests::buttonChordKeepsOneGestureUntilLastRelease()
+{
+    const Qt::MouseButtons states[] = {
+        Qt::LeftButton,
+        Qt::LeftButton, // 移动事件重复上报同一按键状态，不能再次点击。
+        Qt::LeftButton | Qt::RightButton,
+        Qt::LeftButton | Qt::RightButton | Qt::BackButton,
+        Qt::RightButton | Qt::BackButton,
+        Qt::RightButton | Qt::MiddleButton | Qt::BackButton,
+        Qt::MiddleButton | Qt::BackButton,
+        Qt::BackButton, // 最后一个已选按键释放；无关侧键不能维持拖尾。
+        Qt::NoButton,
+    };
+    Qt::MouseButtons previous;
+    int starts = 0, ends = 0, clicks = 0;
+    for (const auto buttons : states) {
+        const auto event = baclickfx::mouseButtonTransitions(
+            buttons, previous, baclickfx::kSupportedTriggerButtons);
+        starts += event.startsGesture();
+        ends += event.endsGesture();
+        for (auto button : {Qt::LeftButton, Qt::RightButton, Qt::MiddleButton}) {
+            clicks += event.pressed.testFlag(button);
+        }
+        previous = buttons;
+    }
+    QCOMPARE(starts, 1);
+    QCOMPARE(ends, 1);
+    QCOMPARE(clicks, 3);
+}
+
+void LogicTests::buttonTriggersIgnoreUnsupportedAndEmptySelections()
+{
+    const auto selected = baclickfx::normalizedTriggerButtons(
+        (Qt::RightButton | Qt::MiddleButton | Qt::BackButton).toInt());
+    QCOMPARE(selected, Qt::MouseButtons(Qt::RightButton | Qt::MiddleButton));
+    const auto together = baclickfx::mouseButtonTransitions(selected, Qt::NoButton, selected);
+    QCOMPARE(together.pressed, selected);
+    QVERIFY(together.startsGesture());
+    const auto disabled = baclickfx::mouseButtonTransitions(
+        baclickfx::kSupportedTriggerButtons, Qt::NoButton, baclickfx::normalizedTriggerButtons(0));
+    QVERIFY(!disabled.held);
+    QCOMPARE(disabled.pressed, Qt::MouseButtons{});
+}
 
 void LogicTests::scalarCurveClampsAndInterpolates()
 {

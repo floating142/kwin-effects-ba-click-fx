@@ -7,6 +7,7 @@
 #include "damageutils.h"
 #include "pathresampler.h"
 #include "outputscaleutils.h"
+#include "mousebuttonutils.h"
 
 #include <core/rendertarget.h>
 #include <core/renderviewport.h>
@@ -276,6 +277,7 @@ void BaClickFxEffect::loadConfig()
     m_enableDistanceEmitter = m_enableTrail
         && group.readEntry(def::kEnableDistanceEmitter, def::kEnableDistanceEmitterDefault);
     m_enableClick = group.readEntry(def::kEnableClick, def::kEnableClickDefault);
+    setTriggerButtons(group.readEntry(def::kTriggerButtons, def::kTriggerButtonsDefault));
     m_disableOnFullscreen = group.readEntry(def::kDisableOnFullscreen,
                                              def::kDisableOnFullscreenDefault);
     m_desktopOnly = group.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault);
@@ -410,7 +412,8 @@ QString BaClickFxEffect::debug(const QString &parameter) const
         .arg(m_disableOnFullscreen)
         .arg(m_desktopOnly)
         .arg(m_excludeApplications)
-        .arg(m_excludedApplications.size());
+        .arg(m_excludedApplications.size())
+        + QStringLiteral(" triggerButtons=%1").arg(m_triggerButtons.toInt());
     if (parameter.compare(QStringLiteral("log"), Qt::CaseInsensitive) == 0
         && logsInstances()) {
         qCInfo(KWIN_BA_CLICK_FX) << "日志测试" << status;
@@ -459,7 +462,8 @@ QString BaClickFxEffect::debug(const QString &parameter) const
             .arg(m_gpu.diagnosticStatus()).arg(m_skipNoActivity).arg(m_skipNoDamage)
             .arg(m_skipGpu).arg(m_skipTarget).arg(m_skipImport)
             .arg(m_enableClick).arg(m_disableOnFullscreen)
-            .arg(m_desktopOnly).arg(m_excludeApplications).arg(m_excludedApplications.size());
+            .arg(m_desktopOnly).arg(m_excludeApplications).arg(m_excludedApplications.size())
+            + QStringLiteral(" trigger_buttons=%1").arg(m_triggerButtons.toInt());
     }
     return status;
 }
@@ -508,10 +512,25 @@ void BaClickFxEffect::applyPreview(const QJsonObject &obj)
     if (obj.contains(QStringLiteral("enableClick"))) {
         m_enableClick = obj.value(QStringLiteral("enableClick")).toBool();
     }
+    if (obj.contains(QStringLiteral("triggerButtons"))) {
+        setTriggerButtons(obj.value(QStringLiteral("triggerButtons")).toInt(
+            baclickfx::defaults::kTriggerButtonsDefault));
+    }
     if (obj.contains(QStringLiteral("disableOnFullscreen"))) {
         m_disableOnFullscreen = obj.value(QStringLiteral("disableOnFullscreen")).toBool();
     }
     refreshSubsystems(effects->cursorPos());
+}
+
+void BaClickFxEffect::setTriggerButtons(int buttons)
+{
+    const auto triggers = baclickfx::normalizedTriggerButtons(buttons);
+    if (triggers != m_triggerButtons) {
+        // 实时预览改键时结束旧笔划，避免已取消的按键继续维持拖尾。
+        endDrag();
+        m_pressSuppressed = false;
+        m_triggerButtons = triggers;
+    }
 }
 
 void BaClickFxEffect::spawn(const QPointF &pos)
@@ -1483,10 +1502,10 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
     if (pos != oldPos) {
         ++m_mouseChangedMotion;
     }
-    const bool wasDown = oldButtons & Qt::LeftButton;
-    const bool isDown = buttons & Qt::LeftButton;
+    const auto transition = baclickfx::mouseButtonTransitions(buttons, oldButtons, m_triggerButtons);
+    const bool isDown = transition.held;
 
-    if (!wasDown && isDown) {
+    if (transition.startsGesture()) {
         // 桌面/应用许可在按下时锁定，全屏抑制还会在拖动过程中实时检查。
         m_pressSuppressed = !isEffectAllowedAt(pos);
         if (m_pressSuppressed) {
@@ -1497,29 +1516,23 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
             }
             return;
         }
-        // AlwaysTrail 会话已经在鼠标移动时建立；左键按下只改变会话模式，
+        // AlwaysTrail 会话已经在鼠标移动时建立；首个触发键按下只改变会话模式，
         // 不要结束并重新创建拖尾，否则一次点击或切换输入模式会产生断裂的新轨迹。
         if (!m_dragging) {
             startDrag(pos);
-        }
-        if (m_enableClick) {
-            spawn(pos);
         }
         m_autoTrailSession = false;
         m_lastDrag = pos;
         m_trailEmit = pos;
         m_trailEmitValid = true;
-        // 从非活动状态切换后请求一个最小区域以启动帧循环；完整 Region 将由随后的
-        // prePaintScreen() 加入 data.paint。
-        effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
-    } else if (wasDown && !isDown) {
+    } else if (transition.endsGesture()) {
         const bool suppressed = m_pressSuppressed;
         m_pressSuppressed = false;
         if (suppressed) {
             return;
         }
         if (m_alwaysTrail && trailEnabled() && m_dragging) {
-            // 释放左键后继续复用同一会话，切回自动拖尾模式。静止期间保留会话，
+            // 全部触发键释放后继续复用同一会话，切回自动拖尾模式。静止期间保留会话，
             // 下一次移动继续同一笔划，不产生断点或新的 TrailSession。
             m_autoTrailSession = true;
             m_lastAutoTrailMotion = std::chrono::steady_clock::now();
@@ -1529,7 +1542,32 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         } else {
             endDrag();
         }
-    } else if (pos != oldPos && (isDown || (m_alwaysTrail && trailEnabled()))) {
+        return;
+    }
+
+    if (transition.pressed && !m_pressSuppressed) {
+        if (!isEffectAllowedAt(pos, InputPhase::HeldMotion)) {
+            endDrag();
+            return;
+        }
+        // 第二个触发键不重建活动拖尾；若此前因全屏停止，则从当前位置起笔。
+        if (!m_dragging) {
+            startDrag(pos);
+        }
+        m_autoTrailSession = false;
+        if (m_enableClick && isEffectAllowedAt(pos)) {
+            for (const auto button : {Qt::LeftButton, Qt::RightButton, Qt::MiddleButton}) {
+                if (transition.pressed.testFlag(button)) {
+                    spawn(pos);
+                }
+            }
+        }
+        // 从非活动状态切换后启动帧循环；完整区域由 prePaintScreen() 申请。
+        effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
+    }
+
+    if (!transition.startsGesture() && pos != oldPos
+        && (isDown || (m_alwaysTrail && trailEnabled()))) {
         // 保留按下时的桌面/应用许可；全屏抑制对按住和悬停两种轨迹都实时生效。
         if (isDown && m_pressSuppressed) {
             return;

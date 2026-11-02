@@ -6,7 +6,7 @@ English documentation: [README.en.md](README.en.md)
 
 **从 Blue Archive Unity UI/FX_Touch 逐参数移植的 KDE Plasma KWin 点击特效与光标拖尾插件。**
 
-`kwin-effects-ba-click-fx` 将 `FX_Touch` 中 ParticleSystem、TrailRenderer 与后处理参数逐项还原到 KWin：点击时播放中心圆盘、溶解圆环和 Ring3 粒子，按住左键拖动时生成 Ribbon 拖尾与 Ring4 距离发射粒子。渲染由原生 C++ / OpenGL 完成，使用线性 RGBA16F Scene 和 Unity PPv2 MXFinalBloom，不依赖脚本运行时。
+`kwin-effects-ba-click-fx` 将 `FX_Touch` 中 ParticleSystem、TrailRenderer 与后处理参数逐项还原到 KWin：点击时播放中心圆盘、溶解圆环和 Ring3 粒子，按住所选触发键拖动时生成 Ribbon 拖尾与 Ring4 距离发射粒子（默认左键）。渲染由原生 C++ / OpenGL 完成，使用线性 RGBA16F Scene 和 Unity PPv2 MXFinalBloom，不依赖脚本运行时。
 
 ![BA Click FX 预览](preview/logo.gif)
 
@@ -83,6 +83,7 @@ KWin 原生插件与当前 KWin 版本绑定；升级 KWin 后需要重新编译
 - 整体尺寸
 - 显示器独立缩放
 - 点击效果开关
+- 左键、右键、中键独立选择，可同时启用
 - 拖尾开关
 - 沿途小三角开关
 - 仅在桌面显示
@@ -91,9 +92,13 @@ KWin 原生插件与当前 KWin 版本绑定；升级 KWin 后需要重新编译
 - 调试日志
 - 重绘区域边框
 
-默认启用点击动画，默认关闭全屏抑制。开启“全屏时禁用拖尾和点击”后，按住拖动
+默认启用点击动画，仅左键触发，默认关闭全屏抑制。每个新按下的已选按键触发一次点击；
+多个已选按键共用一条拖尾，最后一个松开时才结束。取消所有按键可关闭按键触发，
+“始终显示拖尾”仍独立生效。此设置不拦截按键原本的右键菜单、中键粘贴等操作。
+
+开启“全屏时禁用拖尾和点击”后，按住拖动
 进入全屏窗口也会停止发射；离开后从当前位置重新起笔，不跨全屏区域连接轨迹。
-已产生的粒子和拖尾自然淡出。桌面范围和应用排除仍按按下时的条件决定整次手势。
+已产生的粒子和拖尾自然淡出。按住拖尾的桌面范围和应用许可仍在首个触发键按下时判定。
 
 颜色、粒子数量、拖尾宽度、发射间距和 Bloom 参数保持 Unity 原始值，不作为用户调节项。
 

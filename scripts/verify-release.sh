@@ -13,6 +13,7 @@ required_files=(
   po/zh_TW/kwin_ba_click_fx_config.po
   src/metadata.json src/baclickfxeffect.cpp src/baclickfxeffect.h
   src/kwincompat.cpp src/kwincompat.h
+  src/mousebuttonutils.h
   src/applicationfilter.cpp src/applicationfilter.h
   src/gpurenderer.cpp src/gpurenderer.h src/clickinstance.cpp src/clickinstance.h
   src/gputexture.cpp src/gputexture.h
@@ -22,7 +23,7 @@ required_files=(
   src/pathresampler.cpp src/pathresampler.h src/subsystems.cpp src/subsystems.h
   src/meshprofiles.cpp src/meshprofiles.h
   config/CMakeLists.txt config/baclickfxconfig.cpp config/baclickfxconfig.h
-  config/baclickfxconfig.ui tests/CMakeLists.txt tests/logic_tests.cpp tests/gpu_tests.cpp
+  config/baclickfxconfig.ui tests/CMakeLists.txt tests/logic_tests.cpp tests/gpu_tests.cpp tests/config_tests.cpp
   assets/Cylinder002.obj
   assets/FX_TEX_Triangle_02_1.png assets/FX_TEX_Trail_03.png
   assets/FX_TEX_Grad_Ring3.png assets/FX_TEX_Circle_01.png

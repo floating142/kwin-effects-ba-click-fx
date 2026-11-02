@@ -70,6 +70,7 @@ private:
     /// 读取 `[Effect-ba-click-fx]` 配置并重建运行时参数。
     void loadConfig();
     void applyPreview(const QJsonObject &preview);
+    void setTriggerButtons(int buttons);
 
     /// 定位并加载 Cylinder002 OBJ 网格。
     void loadMeshes();
@@ -154,13 +155,14 @@ private:
     bool m_alwaysTrail = false;
     bool m_enableDistanceEmitter = true;
     bool m_enableClick = baclickfx::defaults::kEnableClickDefault;
+    Qt::MouseButtons m_triggerButtons = Qt::MouseButtons::fromInt(baclickfx::defaults::kTriggerButtonsDefault);
     bool m_disableOnFullscreen = baclickfx::defaults::kDisableOnFullscreenDefault;
     bool m_desktopOnly = baclickfx::defaults::kDesktopOnlyDefault;
     bool m_excludeApplications = baclickfx::defaults::kExcludeApplicationsDefault;
     QVector<baclickfx::ExcludedApplication> m_excludedApplications;
     // /proc 身份按 KWin 窗口 UUID 缓存，避免 Always Trail 的移动事件重复读文件。
     mutable QHash<QUuid, baclickfx::ProcessIdentity> m_processIdentityCache;
-    // 按下时固化本次手势的过滤结果，直到松开左键。
+    // 首个已选按键按下时固化许可，直到全部已选按键松开。
     bool m_pressSuppressed = false;
 
     // 当前参数表仅供之后创建的实例使用；活动实例持有自己的参数快照。

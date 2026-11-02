@@ -5,6 +5,7 @@
 
 #include "baclickfxdefaults.h"
 #include "outputscaleutils.h"
+#include "mousebuttonutils.h"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -151,6 +152,12 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     connect(m_ui.enableClickCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.enableClickCheckBox, &QCheckBox::toggled, this, [this] { sendPreview(); });
+    for (auto *checkBox : {m_ui.leftButtonCheckBox, m_ui.rightButtonCheckBox, m_ui.middleButtonCheckBox}) {
+        connect(checkBox, &QCheckBox::toggled, this, [this] {
+            markAsChanged();
+            sendPreview();
+        });
+    }
     connect(m_ui.disableOnFullscreenCheckBox, &QCheckBox::toggled,
             this, &BaClickFxEffectConfig::markAsChanged);
     connect(m_ui.disableOnFullscreenCheckBox, &QCheckBox::toggled,
@@ -637,6 +644,7 @@ void BaClickFxEffectConfig::load()
 
     m_ui.enableClickCheckBox->setChecked(
         conf.readEntry(def::kEnableClick, def::kEnableClickDefault));
+    setTriggerButtons(conf.readEntry(def::kTriggerButtons, def::kTriggerButtonsDefault));
     m_ui.disableOnFullscreenCheckBox->setChecked(
         conf.readEntry(def::kDisableOnFullscreen, def::kDisableOnFullscreenDefault));
     m_ui.desktopOnlyCheckBox->setChecked(
@@ -691,6 +699,7 @@ void BaClickFxEffectConfig::save()
     conf.writeEntry(def::kOutputScaleEnabled, m_ui.showOutputScaleCheckBox->isChecked());
 
     conf.writeEntry(def::kEnableClick, m_ui.enableClickCheckBox->isChecked());
+    conf.writeEntry(def::kTriggerButtons, selectedTriggerButtons());
     conf.writeEntry(def::kDisableOnFullscreen, m_ui.disableOnFullscreenCheckBox->isChecked());
     conf.writeEntry(def::kDesktopOnly, m_ui.desktopOnlyCheckBox->isChecked());
     conf.writeEntry(def::kExcludeApplications,
@@ -730,6 +739,23 @@ void BaClickFxEffectConfig::sendPreview()
     m_previewDebounce.start();
 }
 
+int BaClickFxEffectConfig::selectedTriggerButtons() const
+{
+    Qt::MouseButtons buttons;
+    if (m_ui.leftButtonCheckBox->isChecked()) buttons |= Qt::LeftButton;
+    if (m_ui.rightButtonCheckBox->isChecked()) buttons |= Qt::RightButton;
+    if (m_ui.middleButtonCheckBox->isChecked()) buttons |= Qt::MiddleButton;
+    return buttons.toInt();
+}
+
+void BaClickFxEffectConfig::setTriggerButtons(int buttons)
+{
+    const auto triggers = baclickfx::normalizedTriggerButtons(buttons);
+    m_ui.leftButtonCheckBox->setChecked(triggers.testFlag(Qt::LeftButton));
+    m_ui.rightButtonCheckBox->setChecked(triggers.testFlag(Qt::RightButton));
+    m_ui.middleButtonCheckBox->setChecked(triggers.testFlag(Qt::MiddleButton));
+}
+
 void BaClickFxEffectConfig::dispatchPreview()
 {
     QDBusMessage message = QDBusMessage::createMethodCall(
@@ -743,6 +769,7 @@ void BaClickFxEffectConfig::dispatchPreview()
                                m_ui.desktopOnlyCheckBox->isChecked()},
                               {QStringLiteral("enableClick"),
                                m_ui.enableClickCheckBox->isChecked()},
+                              {QStringLiteral("triggerButtons"), selectedTriggerButtons()},
                               {QStringLiteral("disableOnFullscreen"),
                                m_ui.disableOnFullscreenCheckBox->isChecked()},
                               {QStringLiteral("excludeApplications"),
@@ -781,6 +808,8 @@ void BaClickFxEffectConfig::restorePersistedPreview()
          conf.readEntry(def::kDesktopOnly, def::kDesktopOnlyDefault)},
         {QStringLiteral("enableClick"),
          conf.readEntry(def::kEnableClick, def::kEnableClickDefault)},
+        {QStringLiteral("triggerButtons"),
+         conf.readEntry(def::kTriggerButtons, def::kTriggerButtonsDefault)},
         {QStringLiteral("disableOnFullscreen"),
          conf.readEntry(def::kDisableOnFullscreen, def::kDisableOnFullscreenDefault)},
         {QStringLiteral("excludeApplications"),
@@ -842,6 +871,7 @@ void BaClickFxEffectConfig::defaults()
     // processing its reset action. The persisted overrides are cleared on save.
 
     m_ui.enableClickCheckBox->setChecked(def::kEnableClickDefault);
+    setTriggerButtons(def::kTriggerButtonsDefault);
     m_ui.disableOnFullscreenCheckBox->setChecked(def::kDisableOnFullscreenDefault);
     m_ui.desktopOnlyCheckBox->setChecked(def::kDesktopOnlyDefault);
     m_ui.excludeApplicationsCheckBox->setChecked(def::kExcludeApplicationsDefault);

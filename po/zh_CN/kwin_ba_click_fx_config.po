@@ -30,8 +30,8 @@ msgstr "拖尾"
 msgid "Enable trail"
 msgstr "启用拖尾"
 
-msgid "Show a ribbon while dragging with the left button"
-msgstr "按住左键拖动时产生 ribbon 光带"
+msgid "Show a ribbon while dragging with the selected trigger buttons"
+msgstr "按住所选触发按键拖动时显示飘带"
 
 msgid "Always show trail"
 msgstr "始终显示拖尾"
@@ -188,3 +188,18 @@ msgstr "排除应用"
 
 msgid "Exclude"
 msgstr "排除"
+
+msgid "Trigger buttons"
+msgstr "触发按键"
+
+msgid "Select any combination for clicks and held trails. Always show trail works independently."
+msgstr "选择任意按键组合来触发点击和按住拖尾；始终显示拖尾不受此设置影响。"
+
+msgid "Left button"
+msgstr "左键"
+
+msgid "Right button"
+msgstr "右键"
+
+msgid "Middle button"
+msgstr "中键"

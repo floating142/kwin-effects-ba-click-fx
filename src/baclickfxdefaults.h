@@ -45,6 +45,9 @@ inline constexpr const char *kEnableDistanceEmitter = "EnableDistanceEmitter";
 /// 仅施加点击迸发（Ring/Ring3/MeshTri）的配置键。
 inline constexpr const char *kEnableClick = "EnableClick";
 
+/// 点击与按住拖尾共用的触发按键位掩码。
+inline constexpr const char *kTriggerButtons = "TriggerButtons";
+
 /// 指针下窗口全屏时禁用点击与拖尾的配置键。
 inline constexpr const char *kDisableOnFullscreen = "DisableOnFullscreen";
 
@@ -101,7 +104,10 @@ inline constexpr bool kOutputScaleEnabledDefault = false;
 /// 默认启用拖尾。
 inline constexpr bool kEnableTrailDefault = true;
 
-/// 默认仅在按住左键时产生拖尾。
+/// 默认仅由左键触发（Qt::LeftButton = 1）；右键为 2，中键为 4。
+inline constexpr int kTriggerButtonsDefault = 1;
+
+/// 默认仅在按住所选按键时产生拖尾。
 inline constexpr bool kAlwaysTrailDefault = false;
 
 /// 默认启用距离发射器。
