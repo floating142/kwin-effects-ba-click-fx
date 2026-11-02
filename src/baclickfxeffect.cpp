@@ -516,10 +516,7 @@ void BaClickFxEffect::applyPreview(const QJsonObject &obj)
 
 void BaClickFxEffect::spawn(const QPointF &pos)
 {
-    // 点击落在哪块屏，就按那块屏的高度换算世界单位。
-    const double outputScale = outputScaleForPos(pos);
-    m_subsystems = baclickfx::buildSubsystemMap(m_timeScale, outputScale,
-                                                 outputHeightForPos(pos));
+    refreshSubsystems(pos);
     ClickInstance inst = makeClickInstance(pos, m_subsystems, m_timeScale, m_rng);
     if (logsInstances()) {
         qCInfo(KWIN_BA_CLICK_FX) << "起实例" << pos << "时长" << inst.life
@@ -644,9 +641,19 @@ bool BaClickFxEffect::isWindowExcluded(const Window *window) const
     return false;
 }
 
-bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos) const
+bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos, InputPhase phase) const
 {
-    if (!m_desktopOnly && !m_excludeApplications && !m_disableOnFullscreen) {
+    const bool heldMotion = phase == InputPhase::HeldMotion;
+    if (!m_disableOnFullscreen && (heldMotion || (!m_desktopOnly && !m_excludeApplications))) {
+        return true;
+    }
+
+    Window *window = inputWindowAt(pos);
+    if (m_disableOnFullscreen && window && window->isFullScreen()) {
+        return false;
+    }
+    // 桌面/应用过滤仍在按下时确定，保留跨普通窗口拖动的连续性。
+    if (heldMotion) {
         return true;
     }
 
@@ -658,10 +665,6 @@ bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos) const
         }
     }
 
-    Window *window = inputWindowAt(pos);
-    if (m_disableOnFullscreen && window && window->isFullScreen()) {
-        return false;
-    }
     // X11 桌面窗口具有 Desktop 类型；Wayland layer-shell 背景层由
     // KWin 放入 DesktopLayer。无窗口的输出区域同样是露出的桌面。
     const bool desktop = onOutput
@@ -724,6 +727,12 @@ int BaClickFxEffect::liveDistanceParticles(std::uint64_t dragSerial) const
 void BaClickFxEffect::updateDrag(const QPointF &pos)
 {
     if (!m_dragging) {
+        return;
+    }
+    // 指针回调、mouseChanged 和帧级采样共用此入口，不能让任一路径绕过过滤。
+    const InputPhase phase = m_autoTrailSession ? InputPhase::Trigger : InputPhase::HeldMotion;
+    if (m_pressSuppressed || !isEffectAllowedAt(pos, phase)) {
+        endDrag();
         return;
     }
 
@@ -987,6 +996,12 @@ void BaClickFxEffect::prepareScreen(ScreenPrePaintData &data, std::chrono::nanos
     if (m_autoTrailSession && !m_alwaysTrail
         && std::chrono::steady_clock::now() - m_lastAutoTrailMotion
             > kAutoTrailIdleTimeout) {
+        endDrag();
+    }
+
+    // 窗口也可能在鼠标不动时切为全屏；每帧同步过滤状态，停止当前发射。
+    if (m_dragging && !isEffectAllowedAt(effects->cursorPos(),
+            m_autoTrailSession ? InputPhase::Trigger : InputPhase::HeldMotion)) {
         endDrag();
     }
 
@@ -1472,7 +1487,7 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
     const bool isDown = buttons & Qt::LeftButton;
 
     if (!wasDown && isDown) {
-        // 按下时决定整次手势是否触发；后续拖动不因跨越窗口而突然改变状态。
+        // 桌面/应用许可在按下时锁定，全屏抑制还会在拖动过程中实时检查。
         m_pressSuppressed = !isEffectAllowedAt(pos);
         if (m_pressSuppressed) {
             // 配置变更或窗口在光标下出现时，可能仍留有 AlwaysTrail 会话。
@@ -1515,12 +1530,12 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
             endDrag();
         }
     } else if (pos != oldPos && (isDown || (m_alwaysTrail && trailEnabled()))) {
-        // 按住左键拖动时，沿用按下瞬间的抑制状态，避免拖出桌面区域后特效突然出现；
-        // AlwaysTrail 的悬停轨迹（isDown 为 false）不受按下抑制状态影响，单独判定。
+        // 保留按下时的桌面/应用许可；全屏抑制对按住和悬停两种轨迹都实时生效。
         if (isDown && m_pressSuppressed) {
             return;
         }
-        if (!isDown && !isEffectAllowedAt(pos)) {
+        const InputPhase phase = isDown ? InputPhase::HeldMotion : InputPhase::Trigger;
+        if (!isEffectAllowedAt(pos, phase)) {
             // 结束而不是暂停会话，避免回到桌面时连接一条跨窗口的长线。
             if (m_dragging) {
                 endDrag();
@@ -1530,7 +1545,7 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         if (!m_dragging) {
             // 从非桌面区域进入桌面时从当前位置起笔，避免跨过窗口连线。
             // 普通起笔仍保留 oldPos 到 pos 的首段移动。
-            const QPointF start = !isEffectAllowedAt(oldPos) ? pos : oldPos;
+            const QPointF start = !isEffectAllowedAt(oldPos, phase) ? pos : oldPos;
             startDrag(start);
             m_autoTrailSession = !isDown;
             effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));

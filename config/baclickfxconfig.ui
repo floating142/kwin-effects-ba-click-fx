@@ -130,6 +130,7 @@
    <item>
     <widget class="QCheckBox" name="enableClickCheckBox">
      <property name="text"><string>Enable click effect</string></property>
+     <property name="checked"><bool>true</bool></property>
      <property name="toolTip"><string>Play the click burst on mouse press. The trail and distance particles are not affected.</string></property>
     </widget>
    </item>
@@ -137,7 +138,7 @@
    <item>
     <widget class="QCheckBox" name="disableOnFullscreenCheckBox">
      <property name="text"><string>Disable trail and click effect on fullscreen windows</string></property>
-     <property name="checked"><bool>true</bool></property>
+     <property name="checked"><bool>false</bool></property>
      <property name="toolTip"><string>Skip the effect when the window under the pointer is fullscreen.</string></property>
     </widget>
    </item>

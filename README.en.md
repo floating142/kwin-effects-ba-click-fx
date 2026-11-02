@@ -72,6 +72,8 @@ JOBS=4 ./install-local.sh --system
 
 The configuration page provides time scaling, overall scaling, per-display scaling, a click-effect toggle, a desktop-only switch, fullscreen suppression, application exclusions, trail controls, debug logging and repaint-region borders. To exclude an application, enable **Exclude specified applications**, click **Pick window…**, then select one of its windows; KWin supplies the application identity and the page asks for confirmation before adding it. Steam games without a desktop-file identity combine a valid App ID with the executable name. Lutris run UUIDs change between launches, so Lutris and other Wine games instead combine the Wine prefix with the executable name. Both forms allow a launcher and its game window to be excluded independently. Unity-authored colors, particle counts, trail width, emission spacing and Bloom parameters remain fixed.
 
+Click animations are enabled by default; fullscreen suppression is off by default. When enabled, fullscreen suppression also stops emission when a held drag enters a fullscreen window. Leaving it starts a new stroke at the current position without connecting across the blocked area. Existing particles and trails fade naturally. Desktop and application eligibility for a held gesture remains determined at mouse press.
+
 Remove a system installation with `./uninstall-local.sh --system`; use `--user` for a user installation. Add `--purge-config` to remove saved settings and the enabled state.
 
 ### Per-display scaling

@@ -107,11 +107,11 @@ inline constexpr bool kAlwaysTrailDefault = false;
 /// 默认启用距离发射器。
 inline constexpr bool kEnableDistanceEmitterDefault = true;
 
-/// 默认关闭点击迸发，只保留拖尾。
-inline constexpr bool kEnableClickDefault = false;
+/// 默认启用点击迸发。
+inline constexpr bool kEnableClickDefault = true;
 
-/// 默认在全屏窗口上禁用点击和拖尾。
-inline constexpr bool kDisableOnFullscreenDefault = true;
+/// 默认允许全屏窗口上的点击和拖尾，由用户按需开启抑制。
+inline constexpr bool kDisableOnFullscreenDefault = false;
 
 /// 默认不限制触发来源，任意位置均触发特效。
 inline constexpr bool kDesktopOnlyDefault = false;

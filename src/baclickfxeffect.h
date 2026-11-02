@@ -129,8 +129,10 @@ private:
     /// 按 KWin 输入语义返回 `pos` 处最上层可接收输入的窗口。
     Window *inputWindowAt(const QPointF &pos) const;
 
-    /// 返回当前触发范围与应用排除规则是否允许 `pos` 处的特效。
-    bool isEffectAllowedAt(const QPointF &pos) const;
+    enum class InputPhase { Trigger, HeldMotion };
+
+    /// 按住手势沿用起点的桌面/应用许可；全屏抑制对所有输入阶段实时生效。
+    bool isEffectAllowedAt(const QPointF &pos, InputPhase phase = InputPhase::Trigger) const;
 
     /// 检查窗口及其 transient 主窗口是否命中应用排除规则。
     bool isWindowExcluded(const Window *window) const;
