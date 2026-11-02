@@ -1,8 +1,7 @@
 # 稳定性与兼容性验证
 
-本项目不依赖桌面截图。`ctest` 执行纯逻辑回归，并在 KWin 6.8+、EGL 和 Mesa
-surfaceless 上下文可用时执行离屏 GPU 回归；显示系统相关行为使用嵌套 KWin 会话和
-结构化诊断记录验证。
+默认仅构建纯逻辑与设置页回归。离屏 GPU 回归按需启用，需要 KWin 6.8+、EGL 和
+可用的 surfaceless 上下文；显示系统相关行为使用嵌套 KWin 会话和结构化诊断记录验证。
 
 ## 自动检查
 
@@ -11,6 +10,17 @@ surfaceless 上下文可用时执行离屏 GPU 回归；显示系统相关行为
 ```
 
 可通过 `JOBS=4` 调整并行任务数，或将自定义构建目录作为第一个参数传入。
+后续参数会传给 CMake。修改渲染器、Shader 或颜色管理时，显式启用 GPU 回归：
+
+```bash
+./scripts/verify-release.sh build/verify-gpu -DBA_CLICK_FX_BUILD_GPU_TESTS=ON
+```
+
+GitHub CI 日常只在 Arch 构建插件、KCM 并运行轻量测试及临时安装检查，使用 ccache
+复用编译结果。同仓库 PR 复用分支 push 的检查，fork PR 独立运行；仅文档的 push 不构建，
+同一分支有新提交时取消旧任务。工作流更新合入默认分支后，Fedora/Ubuntu 兼容构建
+和 GPU 回归可在 Actions 的“Run workflow” 中分别开启 `compatibility` 与 `gpu_tests`，
+不再每次提交重复执行。
 
 `scripts/verify-release.sh` 会在临时 `DESTDIR` 中实际安装，并检查插件、KCM、OBJ、四张贴图
 和全部 Shader。临时目录退出时自动删除，不修改用户或系统安装。

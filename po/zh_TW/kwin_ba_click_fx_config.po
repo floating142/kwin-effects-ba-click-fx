@@ -203,3 +203,21 @@ msgstr "右鍵"
 
 msgid "Middle button"
 msgstr "中鍵"
+
+msgid "Effects"
+msgstr "效果"
+
+msgid "Appearance"
+msgstr "外觀"
+
+msgid "Where to show"
+msgstr "觸發範圍"
+
+msgid "Diagnostics"
+msgstr "診斷"
+
+msgid "Timing and scale"
+msgstr "速度與大小"
+
+msgid "Keep logging off during normal use. Enable it only when troubleshooting."
+msgstr "日常使用建議關閉日誌，僅在排查問題時啟用。"

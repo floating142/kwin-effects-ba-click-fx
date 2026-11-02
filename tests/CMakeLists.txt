@@ -37,9 +37,9 @@ if(DBUS_RUN_SESSION_EXECUTABLE)
     set_tests_properties(ba_click_fx_config_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
-# KWin 6.8 的 GLES 存储格式回归需实际 GL 上下文验证；无 EGL 时仍可运行纯逻辑测试。
-if(KWin_VERSION VERSION_GREATER_EQUAL "6.8.0")
-    find_package(OpenGL QUIET COMPONENTS EGL)
+# GPU 回归会再次编译渲染器；日常只构建逻辑和设置页测试，需要时显式启用。
+if(BA_CLICK_FX_BUILD_GPU_TESTS AND KWin_VERSION VERSION_GREATER_EQUAL "6.8.0")
+    find_package(OpenGL REQUIRED COMPONENTS EGL)
     if(TARGET OpenGL::EGL)
         add_executable(ba_click_fx_gpu_tests
             gpu_tests.cpp

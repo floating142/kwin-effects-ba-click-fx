@@ -2,35 +2,75 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'preview/**'
+      - 'LICENSE'
   pull_request:
+  workflow_dispatch:
+    inputs:
+      compatibility:
+        description: 'Also build on Fedora and Ubuntu'
+        type: boolean
+        default: false
+      gpu_tests:
+        description: 'Include offscreen GPU regressions on Arch'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   arch:
+    # 同仓库的分支由 push 验证，避免 PR 再构建一次；fork PR 仍正常验证。
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container: archlinux:latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_COMPILERCHECK: content
     steps:
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          appstream base-devel cmake extra-cmake-modules git kservice kwin libepoxy ninja
+          appstream base-devel ccache cmake extra-cmake-modules git kservice kwin libepoxy ninja
           qt6-base qt6-declarative ripgrep vulkan-headers
 
       - uses: actions/checkout@v4
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-arch-ccache-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-arch-ccache-
 
       - name: Report build environment
         run: ./scripts/ci-environment-report.sh
 
       - name: Verify release
-        run: JOBS=2 ./scripts/verify-release.sh build/ci
+        run: |
+          ccache --max-size=256M
+          JOBS="$(nproc)" ./scripts/verify-release.sh build/ci \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBA_CLICK_FX_BUILD_GPU_TESTS=${{ inputs.gpu_tests && 'ON' || 'OFF' }}
+          ccache --show-stats
 
       - name: Upload environment report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: environment-${{ github.job }}
           path: build-environment.txt
 
   fedora:
+    if: github.event_name == 'workflow_dispatch' && inputs.compatibility
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
@@ -49,16 +89,17 @@ jobs:
         run: ./scripts/ci-environment-report.sh
 
       - name: Verify release
-        run: JOBS=2 ./scripts/verify-release.sh build/ci
+        run: JOBS="$(nproc)" ./scripts/verify-release.sh build/ci
 
       - name: Upload environment report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: environment-${{ github.job }}
           path: build-environment.txt
 
   kubuntu:
+    if: github.event_name == 'workflow_dispatch' && inputs.compatibility
     runs-on: ubuntu-latest
     container: ubuntu:latest
     steps:
@@ -80,10 +121,10 @@ jobs:
         run: ./scripts/ci-environment-report.sh
 
       - name: Verify release
-        run: JOBS=2 ./scripts/verify-release.sh build/ci
+        run: JOBS="$(nproc)" ./scripts/verify-release.sh build/ci
 
       - name: Upload environment report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: environment-${{ github.job }}

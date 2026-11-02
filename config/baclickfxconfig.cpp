@@ -130,18 +130,6 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     // setupUi() 负责为 KCModule 页面安装布局。
     m_ui.setupUi(widget());
 
-    const auto showDebugOptions = [this](bool visible) {
-        m_ui.logLevelLabel->setVisible(visible);
-        m_ui.logLevelComboBox->setVisible(visible);
-        m_ui.debugDamageCheckBox->setVisible(visible);
-        m_ui.copyDiagnosticsButton->setVisible(visible);
-        m_ui.generateDiagnosticsButton->setVisible(visible);
-        m_ui.openDiagnosticsDirButton->setVisible(visible);
-    };
-    connect(m_ui.showDebugOptionsCheckBox, &QCheckBox::toggled,
-            this, showDebugOptions);
-    showDebugOptions(false);
-
     // 运行时范围来自共享默认值；.ui 中的范围仅用于 Designer 预览。
     m_ui.timeScaleSlider->setRange(int(def::kTimeScaleMin * kSliderScale),
                                    int(def::kTimeScaleMax * kSliderScale));

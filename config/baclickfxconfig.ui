@@ -1,12 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!--
-  BA Click FX 配置界面。
-
-  QSlider 仅支持整数，因此带小数的倍率统一放大 100 倍存放，并由
-  baclickfxconfig.cpp 在读写界面时换算。界面只提供平台偏好和功能开关；
-  Unity 数据确定的视觉参数不作为用户配置项。
--->
 <ui version="4.0">
  <class>BaClickFxEffectConfigForm</class>
  <widget class="QWidget" name="BaClickFxEffectConfigForm">
@@ -15,334 +8,607 @@
     <x>0</x>
     <y>0</y>
     <width>600</width>
-    <height>520</height>
+    <height>460</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="mainLayout">
-
-   <!-- 全局设置 -->
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <property name="spacing">
+    <number>12</number>
+   </property>
    <item>
-    <widget class="QGroupBox" name="globalGroupBox">
-     <property name="title">
-      <string>Global</string>
+    <widget class="QTabWidget" name="settingsTabs">
+     <property name="documentMode">
+      <bool>true</bool>
      </property>
-     <layout class="QFormLayout" name="globalFormLayout">
-
-      <item row="0" column="0">
-       <widget class="QLabel" name="timeScaleLabel">
-        <property name="text">
-         <string>Time scale:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <layout class="QHBoxLayout" name="timeScaleLayout">
-        <item>
-         <widget class="QSlider" name="timeScaleSlider">
-          <property name="minimum">
-           <number>20</number>
-          </property>
-          <property name="maximum">
-           <number>500</number>
-          </property>
-          <property name="value">
-           <number>100</number>
-          </property>
-          <property name="orientation">
-           <enum>Qt::Horizontal</enum>
-          </property>
-          <property name="toolTip">
-           <string>Below 1 slows down, above 1 speeds up the effect</string>
-          </property>
+     <widget class="QWidget" name="effectsTab">
+      <attribute name="title">
+       <string>Effects</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="effectsTabLayout">
+       <property name="leftMargin">
+        <number>12</number>
+       </property>
+       <property name="topMargin">
+        <number>12</number>
+       </property>
+       <property name="rightMargin">
+        <number>12</number>
+       </property>
+       <property name="bottomMargin">
+        <number>12</number>
+       </property>
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QCheckBox" name="enableClickCheckBox">
+         <property name="text">
+          <string>Enable click effect</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
+         </property>
+         <property name="toolTip">
+          <string>Play the click burst on mouse press. The trail and distance particles are not affected.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="triggerButtonsGroupBox">
+         <property name="title">
+          <string>Trigger buttons</string>
+         </property>
+         <property name="toolTip">
+          <string>Select any combination for clicks and held trails. Always show trail works independently.</string>
+         </property>
+         <layout class="QHBoxLayout" name="triggerButtonsLayout">
+          <item>
+           <widget class="QCheckBox" name="leftButtonCheckBox">
+            <property name="text">
+             <string>Left button</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="rightButtonCheckBox">
+            <property name="text">
+             <string>Right button</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="middleButtonCheckBox">
+            <property name="text">
+             <string>Middle button</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="trailGroupBox">
+         <property name="title">
+          <string>Trail</string>
+         </property>
+         <layout class="QFormLayout" name="trailFormLayout">
+          <item row="0" column="0" colspan="2">
+           <widget class="QCheckBox" name="enableTrailCheckBox">
+            <property name="text">
+             <string>Enable trail</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="toolTip">
+             <string>Show a ribbon while dragging with the selected trigger buttons</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="2">
+           <widget class="QCheckBox" name="alwaysTrailCheckBox">
+            <property name="text">
+             <string>Always show trail</string>
+            </property>
+            <property name="toolTip">
+             <string>Show trail during pointer movement; may increase GPU usage</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0" colspan="2">
+           <widget class="QCheckBox" name="enableDistanceEmitterCheckBox">
+            <property name="text">
+             <string>Enable distance particles</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="toolTip">
+             <string>Emit triangles by traveled distance</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="effectsSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>0</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="appearanceTab">
+      <attribute name="title">
+       <string>Appearance</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="appearanceTabLayout">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="appearanceScrollArea">
+         <property name="frameShape">
+          <enum>QFrame::NoFrame</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="appearanceContents">
+          <layout class="QVBoxLayout" name="appearanceContentsLayout">
+           <property name="leftMargin">
+            <number>12</number>
+           </property>
+           <property name="topMargin">
+            <number>12</number>
+           </property>
+           <property name="rightMargin">
+            <number>12</number>
+           </property>
+           <property name="bottomMargin">
+            <number>12</number>
+           </property>
+           <property name="spacing">
+            <number>12</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="globalGroupBox">
+             <property name="title">
+              <string>Timing and scale</string>
+             </property>
+             <layout class="QFormLayout" name="globalFormLayout">
+              <item row="0" column="0">
+               <widget class="QLabel" name="timeScaleLabel">
+                <property name="text">
+                 <string>Time scale:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <layout class="QHBoxLayout" name="timeScaleLayout">
+                <item>
+                 <widget class="QSlider" name="timeScaleSlider">
+                  <property name="minimum">
+                   <number>20</number>
+                  </property>
+                  <property name="maximum">
+                   <number>500</number>
+                  </property>
+                  <property name="value">
+                   <number>100</number>
+                  </property>
+                  <property name="orientation">
+                   <enum>Qt::Horizontal</enum>
+                  </property>
+                  <property name="toolTip">
+                   <string>Below 1 slows down, above 1 speeds up the effect</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLabel" name="timeScaleValueLabel">
+                  <property name="text">
+                   <string>1.00</string>
+                  </property>
+                  <property name="minimumWidth">
+                   <number>40</number>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="globalScaleLabel">
+                <property name="text">
+                 <string>Overall scaling:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <layout class="QHBoxLayout" name="globalScaleLayout">
+                <item>
+                 <widget class="QSlider" name="globalScaleSlider">
+                  <property name="minimum">
+                   <number>5</number>
+                  </property>
+                  <property name="maximum">
+                   <number>500</number>
+                  </property>
+                  <property name="value">
+                   <number>100</number>
+                  </property>
+                  <property name="orientation">
+                   <enum>Qt::Horizontal</enum>
+                  </property>
+                  <property name="toolTip">
+                   <string>Scale all elements</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLabel" name="globalScaleValueLabel">
+                  <property name="text">
+                   <string>1.00</string>
+                  </property>
+                  <property name="minimumWidth">
+                   <number>40</number>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="showOutputScaleCheckBox">
+             <property name="text">
+              <string>Enable per-display scaling</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="outputScaleGroupBox">
+             <property name="title">
+              <string />
+             </property>
+             <layout class="QVBoxLayout" name="outputScaleLayout" />
+            </widget>
+           </item>
+           <item>
+            <spacer name="appearanceSpacer">
+             <property name="orientation">
+              <enum>Qt::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>0</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
          </widget>
-        </item>
-        <item>
-         <widget class="QLabel" name="timeScaleValueLabel">
-          <property name="text">
-           <string>1.00</string>
-          </property>
-          <property name="minimumWidth">
-           <number>40</number>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-
-      <item row="1" column="0">
-       <widget class="QLabel" name="globalScaleLabel">
-        <property name="text">
-         <string>Overall scaling:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <layout class="QHBoxLayout" name="globalScaleLayout">
-        <item>
-         <widget class="QSlider" name="globalScaleSlider">
-          <property name="minimum">
-           <number>5</number>
-          </property>
-          <property name="maximum">
-           <number>500</number>
-          </property>
-          <property name="value">
-           <number>100</number>
-          </property>
-          <property name="orientation">
-           <enum>Qt::Horizontal</enum>
-          </property>
-          <property name="toolTip">
-           <string>Scale all elements</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QLabel" name="globalScaleValueLabel">
-          <property name="text">
-           <string>1.00</string>
-          </property>
-          <property name="minimumWidth">
-           <number>40</number>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-
-     </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="scopeTab">
+      <attribute name="title">
+       <string>Where to show</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="scopeTabLayout">
+       <property name="leftMargin">
+        <number>12</number>
+       </property>
+       <property name="topMargin">
+        <number>12</number>
+       </property>
+       <property name="rightMargin">
+        <number>12</number>
+       </property>
+       <property name="bottomMargin">
+        <number>12</number>
+       </property>
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QCheckBox" name="disableOnFullscreenCheckBox">
+         <property name="text">
+          <string>Disable trail and click effect on fullscreen windows</string>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+         <property name="toolTip">
+          <string>Skip the effect when the window under the pointer is fullscreen.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="desktopOnlyCheckBox">
+         <property name="text">
+          <string>Only show effect on desktop</string>
+         </property>
+         <property name="toolTip">
+          <string>Restrict the whole effect, including the trail, to the desktop background (wallpaper). Windows, panels and other UI elements won't trigger it.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="excludeApplicationsCheckBox">
+         <property name="text">
+          <string>Exclude specified applications</string>
+         </property>
+         <property name="toolTip">
+          <string>Do not trigger the effect when clicking applications in the exclusion list</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="excludedApplicationsGroupBox">
+         <property name="title">
+          <string>Excluded applications</string>
+         </property>
+         <layout class="QVBoxLayout" name="excludedApplicationsLayout">
+          <item>
+           <widget class="QLabel" name="excludedApplicationsDescriptionLabel">
+            <property name="text">
+             <string>Pick a window to exclude every window belonging to the same application.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QTreeWidget" name="excludedApplicationsTreeWidget">
+            <property name="minimumHeight">
+             <number>100</number>
+            </property>
+            <property name="rootIsDecorated">
+             <bool>false</bool>
+            </property>
+            <property name="alternatingRowColors">
+             <bool>true</bool>
+            </property>
+            <property name="selectionMode">
+             <enum>QAbstractItemView::ExtendedSelection</enum>
+            </property>
+            <column>
+             <property name="text">
+              <string>Application</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Identifier</string>
+             </property>
+            </column>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="excludedApplicationsButtonsLayout">
+            <item>
+             <widget class="QPushButton" name="addExcludedApplicationButton">
+              <property name="text">
+               <string>Pick window…</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="removeExcludedApplicationButton">
+              <property name="text">
+               <string>Remove</string>
+              </property>
+              <property name="enabled">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="excludedApplicationsButtonsSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="scopeSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>0</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="diagnosticsTab">
+      <attribute name="title">
+       <string>Diagnostics</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="diagnosticsTabLayout">
+       <property name="leftMargin">
+        <number>12</number>
+       </property>
+       <property name="topMargin">
+        <number>12</number>
+       </property>
+       <property name="rightMargin">
+        <number>12</number>
+       </property>
+       <property name="bottomMargin">
+        <number>12</number>
+       </property>
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QLabel" name="diagnosticsDescriptionLabel">
+         <property name="text">
+          <string>Keep logging off during normal use. Enable it only when troubleshooting.</string>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="logLevelLayout">
+         <item>
+          <widget class="QLabel" name="logLevelLabel">
+           <property name="text">
+            <string>Log level:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="logLevelComboBox">
+           <item>
+            <property name="text">
+             <string>Off</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>Errors</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>Instances</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>Frame stats</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>Verbose</string>
+            </property>
+           </item>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="debugDamageCheckBox">
+         <property name="text">
+          <string>Show damage borders</string>
+         </property>
+         <property name="toolTip">
+          <string>Show requested regions; disable for performance tests</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="diagnosticsActionsLayout">
+         <item>
+          <widget class="QPushButton" name="copyDiagnosticsButton">
+           <property name="text">
+            <string>Copy diagnostics</string>
+           </property>
+           <property name="toolTip">
+            <string>Copy plugin, GPU, output and resource status</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="generateDiagnosticsButton">
+           <property name="text">
+            <string>Generate report</string>
+           </property>
+           <property name="toolTip">
+            <string>Save status and recent logs to the diagnostics cache</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="openDiagnosticsDirButton">
+           <property name="text">
+            <string>Open diagnostics folder</string>
+           </property>
+           <property name="toolTip">
+            <string>Open the diagnostics cache folder</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <spacer name="diagnosticsSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>0</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
     </widget>
    </item>
-
-   <item>
-    <widget class="QCheckBox" name="showOutputScaleCheckBox">
-     <property name="text"><string>Enable per-display scaling</string></property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="outputScaleGroupBox">
-     <property name="title"><string/></property>
-     <layout class="QVBoxLayout" name="outputScaleLayout"/>
-    </widget>
-   </item>
-
-   <!-- 触发条件 -->
-   <item>
-    <widget class="QCheckBox" name="enableClickCheckBox">
-     <property name="text"><string>Enable click effect</string></property>
-     <property name="checked"><bool>true</bool></property>
-     <property name="toolTip"><string>Play the click burst on mouse press. The trail and distance particles are not affected.</string></property>
-    </widget>
-   </item>
-
-   <item>
-    <widget class="QGroupBox" name="triggerButtonsGroupBox">
-     <property name="title"><string>Trigger buttons</string></property>
-     <property name="toolTip"><string>Select any combination for clicks and held trails. Always show trail works independently.</string></property>
-     <layout class="QHBoxLayout" name="triggerButtonsLayout">
-      <item><widget class="QCheckBox" name="leftButtonCheckBox">
-       <property name="text"><string>Left button</string></property>
-       <property name="checked"><bool>true</bool></property>
-      </widget></item>
-      <item><widget class="QCheckBox" name="rightButtonCheckBox">
-       <property name="text"><string>Right button</string></property>
-      </widget></item>
-      <item><widget class="QCheckBox" name="middleButtonCheckBox">
-       <property name="text"><string>Middle button</string></property>
-      </widget></item>
-     </layout>
-    </widget>
-   </item>
-
-   <item>
-    <widget class="QCheckBox" name="disableOnFullscreenCheckBox">
-     <property name="text"><string>Disable trail and click effect on fullscreen windows</string></property>
-     <property name="checked"><bool>false</bool></property>
-     <property name="toolTip"><string>Skip the effect when the window under the pointer is fullscreen.</string></property>
-    </widget>
-   </item>
-
-   <item>
-    <widget class="QCheckBox" name="desktopOnlyCheckBox">
-     <property name="text"><string>Only show effect on desktop</string></property>
-     <property name="toolTip"><string>Restrict the whole effect, including the trail, to the desktop background (wallpaper). Windows, panels and other UI elements won't trigger it.</string></property>
-    </widget>
-   </item>
-
-   <item>
-    <widget class="QCheckBox" name="excludeApplicationsCheckBox">
-     <property name="text"><string>Exclude specified applications</string></property>
-     <property name="toolTip"><string>Do not trigger the effect when clicking applications in the exclusion list</string></property>
-    </widget>
-   </item>
-
-   <item>
-    <widget class="QGroupBox" name="excludedApplicationsGroupBox">
-     <property name="title"><string>Excluded applications</string></property>
-     <layout class="QVBoxLayout" name="excludedApplicationsLayout">
-      <item>
-       <widget class="QLabel" name="excludedApplicationsDescriptionLabel">
-        <property name="text"><string>Pick a window to exclude every window belonging to the same application.</string></property>
-        <property name="wordWrap"><bool>true</bool></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QTreeWidget" name="excludedApplicationsTreeWidget">
-        <property name="minimumHeight"><number>100</number></property>
-        <property name="rootIsDecorated"><bool>false</bool></property>
-        <property name="alternatingRowColors"><bool>true</bool></property>
-        <property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property>
-        <column><property name="text"><string>Application</string></property></column>
-        <column><property name="text"><string>Identifier</string></property></column>
-       </widget>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="excludedApplicationsButtonsLayout">
-        <item>
-         <widget class="QPushButton" name="addExcludedApplicationButton">
-          <property name="text"><string>Pick window…</string></property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="removeExcludedApplicationButton">
-          <property name="text"><string>Remove</string></property>
-          <property name="enabled"><bool>false</bool></property>
-         </widget>
-        </item>
-        <item>
-         <spacer name="excludedApplicationsButtonsSpacer">
-          <property name="orientation"><enum>Qt::Horizontal</enum></property>
-          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
-         </spacer>
-        </item>
-       </layout>
-      </item>
-     </layout>
-    </widget>
-   </item>
-
-   <!-- 拖尾设置 -->
-   <item>
-    <widget class="QGroupBox" name="trailGroupBox">
-     <property name="title">
-      <string>Trail</string>
-     </property>
-     <layout class="QFormLayout" name="trailFormLayout">
-
-      <item row="0" column="0" colspan="2">
-       <widget class="QCheckBox" name="enableTrailCheckBox">
-        <property name="text">
-         <string>Enable trail</string>
-        </property>
-        <property name="checked">
-         <bool>true</bool>
-        </property>
-        <property name="toolTip">
-         <string>Show a ribbon while dragging with the selected trigger buttons</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="0" colspan="2">
-       <widget class="QCheckBox" name="alwaysTrailCheckBox">
-        <property name="text"><string>Always show trail</string></property>
-        <property name="toolTip"><string>Show trail during pointer movement; may increase GPU usage</string></property>
-       </widget>
-      </item>
-      <item row="2" column="0" colspan="2">
-       <widget class="QCheckBox" name="enableDistanceEmitterCheckBox">
-        <property name="text"><string>Enable distance particles</string></property>
-        <property name="checked"><bool>true</bool></property>
-        <property name="toolTip"><string>Emit triangles by traveled distance</string></property>
-       </widget>
-      </item>
-
-     </layout>
-    </widget>
-   </item>
-
-   <!-- 调试选项 -->
-   <item>
-    <widget class="QCheckBox" name="showDebugOptionsCheckBox">
-     <property name="text"><string>Show debug options</string></property>
-     <property name="toolTip"><string>Show logging, damage and diagnostics controls</string></property>
-    </widget>
-   </item>
-
-   <item>
-    <layout class="QHBoxLayout" name="logLevelLayout">
-     <item>
-      <widget class="QLabel" name="logLevelLabel">
-       <property name="text"><string>Log level:</string></property>
-      </widget>
-     </item>
-     <item>
-       <widget class="QComboBox" name="logLevelComboBox">
-       <item><property name="text"><string>Off</string></property></item>
-       <item><property name="text"><string>Errors</string></property></item>
-       <item><property name="text"><string>Instances</string></property></item>
-       <item><property name="text"><string>Frame stats</string></property></item>
-       <item><property name="text"><string>Verbose</string></property></item>
-      </widget>
-     </item>
-    </layout>
-   </item>
-
-   <item>
-    <widget class="QCheckBox" name="debugDamageCheckBox">
-     <property name="text">
-      <string>Show damage borders</string>
-     </property>
-     <property name="toolTip">
-      <string>Show requested regions; disable for performance tests</string>
-     </property>
-    </widget>
-   </item>
-
-   <item>
-   <widget class="QPushButton" name="copyDiagnosticsButton">
-     <property name="text">
-      <string>Copy diagnostics</string>
-     </property>
-     <property name="toolTip">
-       <string>Copy plugin, GPU, output and resource status</string>
-     </property>
-   </widget>
-  </item>
-
-   <item>
-    <widget class="QPushButton" name="generateDiagnosticsButton">
-     <property name="text"><string>Generate report</string></property>
-     <property name="toolTip"><string>Save status and recent logs to the diagnostics cache</string></property>
-    </widget>
-   </item>
-
-   <item>
-    <widget class="QPushButton" name="openDiagnosticsDirButton">
-     <property name="text">
-      <string>Open diagnostics folder</string>
-     </property>
-     <property name="toolTip">
-      <string>Open the diagnostics cache folder</string>
-     </property>
-    </widget>
-   </item>
-
-   <item>
-    <spacer name="verticalSpacer">
-     <property name="orientation">
-      <enum>Qt::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>20</height>
-      </size>
-     </property>
-    </spacer>
-   </item>
-
   </layout>
  </widget>
- <resources/>
- <connections/>
+ <resources />
+ <connections />
 </ui>

@@ -6,6 +6,9 @@ set -euo pipefail
 src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${src_dir}"
 build_dir="${1:-build/verify}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
 required_files=(
   LICENSE README.md README.en.md TODO.md TESTING.md CMakeLists.txt
@@ -102,7 +105,8 @@ cmake_generator_args=()
 if command -v ninja >/dev/null 2>&1; then
   cmake_generator_args=(-G Ninja)
 fi
-cmake -S . -B "${build_dir}" "${cmake_generator_args[@]}" -DBUILD_TESTING=ON
+cmake -S . -B "${build_dir}" "${cmake_generator_args[@]}" \
+  -DBUILD_TESTING=ON -DBA_CLICK_FX_BUILD_GPU_TESTS=OFF "$@"
 
 echo "==> 构建"
 cmake --build "${build_dir}" -j"${JOBS:-2}"
