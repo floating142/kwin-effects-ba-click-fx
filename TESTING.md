@@ -1,7 +1,8 @@
 # 稳定性与兼容性验证
 
-本项目不使用截图或像素回归测试。纯逻辑回归由 `ctest` 执行，显示系统相关行为使用
-嵌套 KWin 会话和结构化诊断记录验证。
+本项目不依赖桌面截图。`ctest` 执行纯逻辑回归，并在 KWin 6.8+、EGL 和 Mesa
+surfaceless 上下文可用时执行离屏 GPU 回归；显示系统相关行为使用嵌套 KWin 会话和
+结构化诊断记录验证。
 
 ## 自动检查
 
@@ -13,6 +14,34 @@
 
 `scripts/verify-release.sh` 会在临时 `DESTDIR` 中实际安装，并检查插件、KCM、OBJ、四张贴图
 和全部 Shader。临时目录退出时自动删除，不修改用户或系统安装。
+
+离屏 GPU 回归使用当前源码中的资源和软件 GLES 上下文，不操作宿主桌面。检查包括：
+
+- RGBA16F 附件实际保存大于 1 的高亮和微小暗部值；
+- sRGB 采样硬件解码、原有 Alpha 上传语义和上传状态恢复；
+- 暗背景经导入与最终合成后保持不变，覆盖 direct/blit 和 1.0/1.6 缩放；
+- 真实 Bloom 金字塔将 HDR 亮源扩散到几何范围之外。
+
+无法创建离屏 EGL 上下文时 GPU 用例会明确标记为跳过，不代表通过渲染验证。
+
+KWin 6.8 改为 GLES 后，`GLTexture::allocate()` 的实际存储可能是普通 8 位格式，
+即使 `internalFormat()` 仍报告 RGBA16F 或 sRGB。因此本插件显式分配 sized 存储，
+GPU 回归检查实际附件类型和渲染数值，防止暗背景黑块及 Bloom 能量截断再次出现。
+
+## KWin API 兼容层
+
+KWin 6.8 是默认开发和验证目标。`src/kwincompat.h/.cpp` 统一处理生命周期入口，
+特效主体只实现状态更新、叠层绘制和指针位置采样，不包含版本条件分支。
+
+| KWin | 呈现时间戳 | 底层绘制结果 | 指针移动 |
+| --- | --- | --- | --- |
+| 6.8+（默认） | `RenderView` | `bool`，失败时不绘制叠层 | `pointerMotion` |
+| 6.7 | `RenderView` | `void` | `pointerMotion` |
+| 6.6 | `prePaintScreen` 参数 | `void` | `mouseChanged` / 帧级回退 |
+
+CMake 仅为旧版本启用 `BA_CLICK_FX_KWIN_LEGACY_*` 宏，最低版本显式要求 6.6。
+升级兼容逻辑时，应核对调用链只转发一次、时间戳单位为纳秒，以及 6.8 绘制失败的传播。
+旧版本头文件编译检查不能代替匹配版本 KWin 的实际加载与运行验证。
 
 ## 嵌套会话检查
 

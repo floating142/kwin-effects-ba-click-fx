@@ -24,7 +24,7 @@ English documentation: [README.en.md](README.en.md)
 
 ## 运行要求
 
-- KDE Plasma 6 / KWin 6.6 或更高版本
+- KDE Plasma 6 / KWin 6.8 为主要目标，同时保留 6.6/6.7 兼容
 - OpenGL 合成器；项目没有 CPU 渲染回退
 - CMake 3.20+
 - ECM 6.22+
@@ -32,7 +32,7 @@ English documentation: [README.en.md](README.en.md)
 - KF6 6.22+
 - 与当前运行版本匹配的 KWin 开发包
 
-KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。本项目兼容 KWin 6.6 及更高版本；升级 KWin 后必须用对应版本开发包重新编译，否则 KWin 会忽略旧二进制。
+KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。6.8 是默认开发和验证目标，6.6/6.7 的接口差异集中在 `src/kwincompat.*`；升级 KWin 后必须用对应版本开发包重新编译，否则 KWin 会忽略旧二进制。
 
 ## 安装
 

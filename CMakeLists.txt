@@ -48,7 +48,7 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui DBus Quick Widgets)
 # KCMUtils 为配置模块提供 KCModule 基类和 ki18n_wrap_ui。
 find_package(KF6 6.22 REQUIRED COMPONENTS Config CoreAddons I18n KCMUtils Service WindowSystem)
 
-find_package(KWin REQUIRED)
+find_package(KWin 6.6 REQUIRED)
 
 # EffectPluginFactory 的接口标识包含 KWin 版本，升级 KWin 后必须重新编译插件。
 # 配置阶段输出目标版本，供文档与安装脚本核对。

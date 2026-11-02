@@ -8,14 +8,12 @@
 #include "pathresampler.h"
 #include "outputscaleutils.h"
 
+#include <core/rendertarget.h>
 #include <core/renderviewport.h>
 #include <effect/effecthandler.h>
-#include <input_event.h>
 #include <opengl/glshader.h>
 #include <opengl/glvertexbuffer.h>
 #include <opengl/glshadermanager.h>
-// prePaintScreen() 使用 RenderView 的呈现时间戳，因此需要完整类型定义。
-#include <scene/scene.h>
 #include <window.h>
 #include <workspace.h>
 
@@ -790,8 +788,7 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
     m_lastDrag = pos;
 }
 
-#ifndef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
-void BaClickFxEffect::pointerMotion(PointerMotionEvent *event)
+void BaClickFxEffect::handlePointerMotion(const QPointF &position)
 {
     // 输入事件采样频率可高于帧率，因此能够保留快速拖动中的帧内转折点。
     if (!m_dragging) {
@@ -803,13 +800,12 @@ void BaClickFxEffect::pointerMotion(PointerMotionEvent *event)
     m_motionEventsWork = true;
     ++m_pointerMotionEvents;
     ++m_inputEvents;
-    updateDrag(event->position);
+    updateDrag(position);
     if (logsFrames()) {
         m_inputCpuMsSinceLog += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - t0).count();
     }
 }
-#endif
 
 void BaClickFxEffect::endDrag()
 {
@@ -960,22 +956,11 @@ void BaClickFxEffect::resetFrameStats()
     m_outputFrameStats.clear();
 }
 
-#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
-void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime)
-#else
-void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
-#endif
+void BaClickFxEffect::prepareScreen(ScreenPrePaintData &data, std::chrono::nanoseconds now)
 {
     const auto cpuStart = logsFrames() ? std::chrono::steady_clock::now()
                                      : std::chrono::steady_clock::time_point{};
-    // 使用合成器的呈现时间戳推进动画。
-    const std::chrono::nanoseconds now =
-#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
-        std::chrono::duration_cast<std::chrono::nanoseconds>(presentTime);
-#else
-        data.view ? data.view->nextPresentationTimestamp() : std::chrono::nanoseconds{0};
-#endif
-
+    // 兼容层统一提供合成器的呈现时间戳。
     if (m_lastFrame.count() != 0 && now > m_lastFrame) {
         // 限制会话恢复后的异常长时间步，避免实例在单帧内跳过全部生命周期。
         const double dt = std::min(std::chrono::duration<double>(now - m_lastFrame).count(), 0.1);
@@ -1024,12 +1009,6 @@ void BaClickFxEffect::prePaintScreen(ScreenPrePaintData &data)
         m_lastPrePaintCpuMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - cpuStart).count();
     }
-
-#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
-    effects->prePaintScreen(data, presentTime);
-#else
-    effects->prePaintScreen(data);
-#endif
 }
 
 void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,
@@ -1206,31 +1185,12 @@ void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,
     resetFrameStats();
 }
 
-#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
-[[nodiscard]] bool BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                                                int mask, const Region &deviceRegion, LogicalOutput *screen)
-#else
-void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                                int mask, const Region &deviceRegion, LogicalOutput *screen)
-#endif
+void BaClickFxEffect::paintOverlay(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                                  const Region &deviceRegion)
 {
-    // 先让底下的窗口/桌面画完，粒子是叠在最上面的。KWin 6.8 起该调用返回绘制是否
-    // 成功（false 表示 GPU reset 等失败），失败时立即停止本帧渲染。
-#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
-    if (!effects->paintScreen(renderTarget, viewport, mask, deviceRegion, screen)) {
-        return false;
-    }
-#else
-    effects->paintScreen(renderTarget, viewport, mask, deviceRegion, screen);
-#endif
-
     if (m_instances.empty() && m_bursts.empty() && m_trails.empty()) {
         ++m_skipNoActivity;
-#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
-        return true;
-#else
         return;
-#endif
     }
 
     // Shader 和纹理需要有效 OpenGL 上下文，因此在首次绘制时初始化。失败后不在每帧
@@ -1246,11 +1206,7 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
     }
     if (!m_gpuReady) {
         ++m_skipGpu;
-#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
-        return true;
-#else
         return;
-#endif
     }
 
     if (!logsFrames()) {
@@ -1258,11 +1214,7 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
         if (m_debugDamage) {
             drawDebugDamage(renderTarget, viewport);
         }
-#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
-        return true;
-#else
         return;
-#endif
     }
 
     // 帧统计级别下测量 paintScreen() 的 CPU 墙钟时间。
@@ -1274,9 +1226,6 @@ void BaClickFxEffect::paintScreen(const RenderTarget &renderTarget, const Render
     if (m_debugDamage) {
         drawDebugDamage(renderTarget, viewport);
     }
-#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
-    return true;
-#endif
 }
 
 void BaClickFxEffect::drawDebugDamage(const RenderTarget &renderTarget,

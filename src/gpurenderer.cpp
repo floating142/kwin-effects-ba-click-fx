@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "gpurenderer.h"
+#include "gputexture.h"
 #include "baclickfxdefaults.h"
 #include "clickinstance.h"
 #include "curveutils.h"
@@ -434,15 +435,12 @@ std::unique_ptr<GLTexture> GPURenderer::loadTexture(const char *assetName, GLenu
         return nullptr;
     }
 
-    // Unity 在线性颜色空间中采样 sRGB 纹理。显式分配 GL_SRGB8_ALPHA8，使 GPU
-    // 采样时自动解码；统一转换为 RGBA8888，保证 glTexSubImage2D 的通道排列一致。
-    const QImage rgba = img.convertToFormat(QImage::Format_RGBA8888);
-    auto tex = GLTexture::allocate(GL_SRGB8_ALPHA8, rgba.size(), 1);
+    // 保留原有 Alpha 上传语义，并确保采样时硬件执行 sRGB 解码。
+    auto tex = baclickfx::uploadSrgbTexture(img);
     if (!tex || tex->isNull()) {
         GPU_ERROR() << "code=texture_alloc_failed" << "path=" << path;
         return nullptr;
     }
-    tex->update(rgba, Region(0, 0, rgba.width(), rgba.height()));
 
     // Unity .meta 中 filterMode=1 且 enableMipMap=0，对应线性过滤且不生成多级纹理。
     tex->setFilter(GL_LINEAR);
@@ -497,7 +495,7 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
     targets->transformKind = transformKind;
 
     // 创建线性 RGBA16F 场景纹理及其帧缓冲。
-    targets->hdrTexture = GLTexture::allocate(GL_RGBA16F, devicePx, 1);
+    targets->hdrTexture = baclickfx::allocateTexture(GL_RGBA16F, devicePx);
     if (!targets->hdrTexture || targets->hdrTexture->isNull()) {
         GPU_ERROR() << "code=hdr_texture_alloc_failed" << devicePx;
         return false;
@@ -579,7 +577,7 @@ bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devic
         // 反馈环；该结构与 PPv2 的 m_Pyramid[i].down/up 一致。
         const auto makeLevel = [&s](std::unique_ptr<GLTexture> &tex,
                                     std::unique_ptr<GLFramebuffer> &fbo) {
-            tex = GLTexture::allocate(GL_RGBA16F, s, 1);
+            tex = baclickfx::allocateTexture(GL_RGBA16F, s);
             if (!tex || tex->isNull()) {
                 GPU_ERROR() << "code=bloom_texture_alloc_failed" << s;
                 return false;
@@ -851,7 +849,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
     m_lastImportDirect = directImport;
 
     if (!directImport && !m_current->bgTexture) {
-        m_current->bgTexture = GLTexture::allocate(GL_RGBA16F, m_current->devicePx, 1);
+        m_current->bgTexture = baclickfx::allocateTexture(GL_RGBA16F, m_current->devicePx);
         if (!m_current->bgTexture || m_current->bgTexture->isNull()) {
             GPU_ERROR() << "code=background_texture_alloc_failed" << m_current->devicePx;
             finishGpuTimingFrame(false);

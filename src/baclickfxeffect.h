@@ -8,13 +8,12 @@
 #include "clickinstance.h"
 #include "curveutils.h"
 #include "gpurenderer.h"
+#include "kwincompat.h"
 #include "meshprofiles.h"
 #include "subsystems.h"
 #include "trailstream.h"
 
 #include <core/region.h>
-#include <input_event.h>
-#include <effect/effect.h>
 
 #include <QLoggingCategory>
 #include <QHash>
@@ -34,7 +33,7 @@ namespace KWin
 class Window;
 
 /** KWin effect that renders the ported FX_Touch particle and trail systems. */
-class BaClickFxEffect : public Effect
+class BaClickFxEffect : public BaClickFxEffectBase
 {
     Q_OBJECT
 
@@ -47,25 +46,7 @@ public:
     int requestedEffectChainPosition() const override;
     QString debug(const QString &parameter) const override;
 
-#ifdef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
-    void prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime) override;
-#else
-    void prePaintScreen(ScreenPrePaintData &data) override;
-#endif
-    /// 绘制底层场景后，将粒子和拖尾合成到当前输出。
-#ifdef BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL
-    [[nodiscard]] bool paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                                   int mask, const Region &deviceRegion, LogicalOutput *screen) override;
-#else
-    void paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                     int mask, const Region &deviceRegion, LogicalOutput *screen) override;
-#endif
     void postPaintScreen() override;
-
-#ifndef BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME
-    /// 使用输入事件采样拖动轨迹，避免高回报率设备的帧内路径信息丢失。
-    void pointerMotion(PointerMotionEvent *event) override;
-#endif
 
     static bool supported();
 
@@ -76,6 +57,16 @@ private Q_SLOTS:
                           Qt::KeyboardModifiers modifiers, Qt::KeyboardModifiers oldModifiers);
 
 private:
+    /// 用统一的呈现时间戳推进模拟和申请重绘。
+    void prepareScreen(ScreenPrePaintData &data, std::chrono::nanoseconds presentTime) override;
+
+    /// 底层场景成功后，将粒子和拖尾合成到当前输出。
+    void paintOverlay(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                       const Region &deviceRegion) override;
+
+    /// 保留高回报率设备的帧内路径；旧后端沿用已有采样回退。
+    void handlePointerMotion(const QPointF &position) override;
+
     /// 读取 `[Effect-ba-click-fx]` 配置并重建运行时参数。
     void loadConfig();
     void applyPreview(const QJsonObject &preview);

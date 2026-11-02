@@ -24,12 +24,12 @@ Chinese documentation: [README.md](README.md)
 
 ## Requirements
 
-- KDE Plasma 6 / KWin 6.6 or newer.
+- KDE Plasma 6 / KWin 6.8 as the primary target, with 6.6/6.7 compatibility retained.
 - OpenGL compositing; there is no CPU rendering fallback.
 - CMake 3.20+, ECM 6.22+, Qt 6.10+ and KF6 6.22+.
 - KWin development files matching the running KWin version.
 
-KWin native effect plugins are ABI-bound to `EffectPluginFactory`. Rebuild with matching development packages after a KWin upgrade.
+KWin native effect plugins are ABI-bound to `EffectPluginFactory`. Version 6.8 is the default development and validation target; API differences for 6.6/6.7 are isolated in `src/kwincompat.*`. Rebuild with matching development packages after a KWin upgrade.
 
 ## Install
 

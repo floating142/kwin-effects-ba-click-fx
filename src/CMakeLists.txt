@@ -7,19 +7,15 @@ target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE
     BA_CLICK_FX_KWIN_VERSION="${KWin_VERSION}"
 )
 
-# KWin 6.6 passes the expected presentation timestamp to prePaintScreen(),
-# while KWin 6.7 and newer removed that argument. Keep one source tree
-# buildable against both API variants.
+# KWin 6.8 为默认 API；只有旧版本启用适配，版本宏仅供 kwincompat 使用。
+# 6.6 从 prePaintScreen 参数获取时间戳，且没有 pointerMotion 回调。
 if(KWin_VERSION VERSION_LESS "6.7.0")
-    target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_PREPAINT_HAS_PRESENT_TIME)
+    target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_LEGACY_PREPAINT)
 endif()
 
-# KWin 6.8 changed Effect::paintScreen and EffectsHandler::paintScreen to return
-# [[nodiscard]] bool (false signals a GPU reset / failed paint). Guard the
-# override and the underlying effects->paintScreen() call so the same source
-# tree still builds against 6.6/6.7, where the method returned void.
-if(KWin_VERSION VERSION_GREATER_EQUAL "6.8.0")
-    target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_PAINTSCREEN_RETURNS_BOOL)
+# 6.6/6.7 的 paintScreen 返回 void；6.8 默认传播 bool 绘制结果。
+if(KWin_VERSION VERSION_LESS "6.8.0")
+    target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN)
 endif()
 
 # KWIN_EFFECT_FACTORY_* 宏展开后才包含 Q_OBJECT。将这些宏注册给 AutoMoc，确保
@@ -34,8 +30,10 @@ set_property(TARGET kwin4_effect_ba_click_fx PROPERTY AUTOMOC_MACRO_NAMES
 
 target_sources(kwin4_effect_ba_click_fx PRIVATE
     baclickfxeffect.cpp
+    kwincompat.cpp
     applicationfilter.cpp
     gpurenderer.cpp
+    gputexture.cpp
     clickinstance.cpp
     trailstream.cpp
     curveutils.cpp
