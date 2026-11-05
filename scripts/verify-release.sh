@@ -16,6 +16,13 @@ required_files=(
   po/zh_TW/kwin_ba_click_fx_config.po
   src/metadata.json src/baclickfxeffect.cpp src/baclickfxeffect.h
   src/kwincompat.cpp src/kwincompat.h
+  src/frameclock.h src/unity/trailpoints.h src/unity/emission.h src/unity/lineribbon.h src/unity/billboard.h
+  tests/native/billboard_oracle.cpp
+  tests/native/distance_oracle.cpp tests/native/trail_mesh_oracle.cpp
+  tests/fixtures/unity-trail-mesh-native.json
+  tests/native/birth_oracle.cpp tests/fixtures/unity-birth-native.json
+  tests/native/native_oracle.h tests/native/trail_points_oracle.cpp
+  tests/fixtures/unity-trail-points-native.json
   src/mousebuttonutils.h
   src/applicationfilter.cpp src/applicationfilter.h
   src/gpurenderer.cpp src/gpurenderer.h src/clickinstance.cpp src/clickinstance.h
@@ -25,6 +32,14 @@ required_files=(
   src/bloomutils.cpp src/bloomutils.h
   src/pathresampler.cpp src/pathresampler.h src/subsystems.cpp src/subsystems.h
   src/meshprofiles.cpp src/meshprofiles.h
+  src/curvedata.h src/touchparams.h
+  src/unity/random.h src/unity/initial.h src/unity/shape.h src/unity/circle.h
+  src/unity/gradient.h src/unity/curve.h src/unity/uv.h src/unity/rotation.h
+  src/unity/motion.h src/unity/retirement.h src/unity/timing.h
+  scripts/import-unity-touch.py scripts/verify-unity-native.py docs/unity-parity.md
+  tests/fixtures/unity-touch.json tests/fixtures/unity-gradient-native.json
+  tests/fixtures/unity-rotation-native.json tests/native/rotation_oracle.cpp
+  tests/fixtures/unity-motion-native.json
   config/CMakeLists.txt config/baclickfxconfig.cpp config/baclickfxconfig.h
   config/baclickfxconfig.ui tests/CMakeLists.txt tests/logic_tests.cpp tests/gpu_tests.cpp tests/config_tests.cpp
   assets/Cylinder002.obj

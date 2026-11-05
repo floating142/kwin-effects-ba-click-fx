@@ -18,7 +18,7 @@ Chinese documentation: [README.md](README.md)
 - Linear RGBA16F scene, HDR particle blending and Unity PPv2 MXFinalBloom.
 - Sparse damage regions so only changed pixels are imported, processed and composited.
 - Multi-monitor, HiDPI and different output scale support.
-- KWin pointer events preserve high-polling-rate mouse movement for accurate trails.
+- Native KWin pointer input samples trails once per actual presentation frame on the cursor’s output.
 - KCM configuration page, repaint-region markers and segmented CPU/GPU performance logs.
 - Live preview in the settings page; changes are saved only on Apply.
 
@@ -120,7 +120,7 @@ Reports are stored in `~/.cache/ba-click-fx/diagnostics/`. `DebugDamage` draws r
 
 ## Rendering architecture
 
-Each frame imports changed desktop pixels into a linear RGBA16F scene, draws Trail, Ring/Ring3, Ring4 and MeshTri in Unity render-queue order, runs the PPv2 MXFinalBloom pyramid over the actual bright source region, then composites the scene and applies the KWin output transfer function. FBOs and Bloom pyramids are reused per output; damage regions reduce unchanged texel work without changing shaders, sampling kernels, geometry or particle parameters.
+Each frame imports changed desktop pixels into a linear RGBA16F scene, draws Trail, Ring and MeshTri in the UIAlwaysVisible pass, and builds the PPv2 MXFinalBloom pyramid. The LetterBox pass adds Ring3 and Ring4 after Bloom sampling. The final composite applies the KWin output transfer function. FBOs and Bloom pyramids are reused per output; damage regions reduce unchanged texel work without changing shaders, sampling kernels, geometry or particle parameters.
 
 ## License
 

@@ -228,7 +228,7 @@ std::optional<CylinderProfile> loadCylinderObjProfile(const std::string &path)
     profile.mesh.uvs = data.uvs;
     profile.mesh.uvFaces = data.uvFaces;
 
-    // 圆环的几何是按角度程序化重建的，不直接画 OBJ 面，所以 UV 只能取范围来用。
+    // 保留源网格 UV 范围供诊断；实际渲染使用逐角 UV，不按范围重建。
     // Cylinder002 的 vt 在两轴上都落在 [0.0005, 0.99950004]（导出时的固定内缩），
     // 这正是 ba-click-fx 里 textureUvMin / textureUvMax 那两个数的来源。
     if (!data.uvs.empty()) {
@@ -255,6 +255,12 @@ MeshProfiles loadMeshProfiles(const std::string &cylinderPath)
         profiles.cylinder002 = *cylinder;
 
     return profiles;
+}
+
+Vertex unityObjPointOffset(const Vertex &point, double scale, double c, double s)
+{
+    const double x = -point[0] * scale, y = -point[1] * scale;
+    return {x * c - y * s, x * s + y * c};
 }
 
 } // namespace baclickfx

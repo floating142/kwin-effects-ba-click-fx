@@ -40,9 +40,20 @@ BloomPyramidParams bloomPyramidParams(const QSize &baseSize)
 double bloomReachPx(const QSize &devicePixels, double scale)
 {
     const BloomPyramidParams params = bloomPyramidParams(bloomBaseSize(devicePixels));
-    // 设备像素传播半径由最后一级尺度和采样核共同决定，再换算回逻辑像素。
-    const double reachDevice =
-        (1.0 + double(params.sampleScale)) * double(1 << params.iterations);
+    // 每次采样的双线性足迹也占半个源纹理像素。降采样四点核贡献 1.5，
+    // 上采样（含最终合成）贡献 sampleScale/2 + 0.5，不能只估计最粗一级。
+    // 使用实际纹理尺寸计算，覆盖奇数分辨率、窄屏及短边已降到 1 的金字塔。
+    double reachDevice = 1.5; // 全分辨率到第 0 级的预筛选。
+    QSize level = bloomBaseSize(devicePixels).expandedTo(QSize(1, 1));
+    for (int i = 0; i < params.iterations; ++i) {
+        const double texel = std::max(double(devicePixels.width()) / level.width(),
+                                      double(devicePixels.height()) / level.height());
+        reachDevice += (double(params.sampleScale) * .5 + .5) * texel;
+        if (i + 1 < params.iterations) {
+            reachDevice += 1.5 * texel;
+        }
+        level = QSize(std::max(1, level.width() / 2), std::max(1, level.height() / 2));
+    }
     return reachDevice / std::max(scale, 0.01);
 }
 

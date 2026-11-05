@@ -21,6 +21,13 @@ target_compile_definitions(ba_click_fx_logic_tests PRIVATE
 target_link_libraries(ba_click_fx_logic_tests PRIVATE Qt6::Test Qt6::Gui)
 add_test(NAME ba_click_fx_logic_tests COMMAND ba_click_fx_logic_tests)
 
+# 只核对已提交的数据表，不读取游戏安装，也不触发原函数/GPU 专项构建。
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME ba_click_fx_unity_parameters
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/import-unity-touch.py --check)
+endif()
+
 # 设置页测试使用独立 D-Bus 会话和临时配置，不向宿主 KWin 发送预览。
 find_program(DBUS_RUN_SESSION_EXECUTABLE dbus-run-session)
 if(DBUS_RUN_SESSION_EXECUTABLE)

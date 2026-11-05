@@ -32,5 +32,6 @@ void main()
     color += bloom * u_bloomIntensity * u_bloomColor;
 
     // 输出目标为不透明桌面；粒子累计透明度不具备覆盖度语义。
-    out_color = vec4(tfEncode(color), 1.0);
+    vec3 linearOutput = (u_colorMatrix * vec4(color, 0.0)).rgb;
+    out_color = vec4(tfEncode(linearOutput), 1.0);
 }

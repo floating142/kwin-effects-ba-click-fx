@@ -133,11 +133,7 @@ double evalScalarStops(const ScalarCurve &stops, double t, double fallback = 1.0
 /// 逐通道线性采样 RGB 曲线；空曲线返回 `fallback`。
 Rgb evalColorStops(const ColorCurve &stops, double t, const Rgb &fallback);
 
-/**
- * 粒子发射使用的均匀随机数源。
- *
- * 显式种子构造函数用于生成可复现序列；默认构造函数用于运行时随机播种。
- */
+/// 为各 ParticleSystem 提供独立自动种子；模块内部由 unity::Random 采样。
 class Rng
 {
 public:
@@ -145,8 +141,7 @@ public:
     /// 使用系统随机设备播种。
     Rng();
 
-    /// 返回 `[a, b)` 内的均匀随机数；`a == b` 时返回 `a`。
-    double range(double a, double b);
+    std::uint32_t nextSeed() { return std::uint32_t(m_engine()); }
 
 private:
     std::mt19937_64 m_engine;

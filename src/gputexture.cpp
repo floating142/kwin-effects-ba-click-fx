@@ -55,9 +55,9 @@ std::unique_ptr<GLTexture> uploadSrgbTexture(const QImage &image)
     if (image.isNull()) {
         return nullptr;
     }
-    // 保留旧 GLTexture::update() 格式回退所用的预乘 Alpha，但显式使用 RGBA：
-    // GLES 上的 BGRA 上传不适用于这里的 sized sRGB 存储。
-    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+    // Unity 纹理保留直通 RGB；材质着色器各自处理 Alpha。预乘会令渐变贴图
+    // 在 sRGB 解码前额外变暗，使 Dissolve 边缘和三角粒子的辉光衰减两次。
+    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
     GLint alignment = 0, rowLength = 0, skipPixels = 0, skipRows = 0;
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
     glGetIntegerv(GL_UNPACK_ROW_LENGTH, &rowLength);

@@ -45,7 +45,7 @@ constexpr float kBloomKnee = kBloomThreshold * 0.0f + 1e-5f;
 // Intensity 配置值为 1.7。PPv2 的 BloomRenderer.Render 会先执行
 //     intensity = Exp2(settings.intensity / 10) - 1
 // 因此最终合成阶段使用约 0.1250 的 _Bloom_Settings.y。
-constexpr float kBloomIntensity = 0.12503f;
+const float kBloomIntensity = std::exp2(1.7f / 10.f) - 1.f;
 // Clamp 为 65472。PPv2 在传入着色器前调用 GammaToLinearSpace：
 //     pow(65472, 2.2) ≈ 3.9385e10
 // 当前配置下首先生效的是半精度浮点上限 65504；保留独立 Clamp 值以维持 PPv2 的
@@ -54,8 +54,6 @@ constexpr float kBloomIntensity = 0.12503f;
 constexpr float kBloomClampMax = 3.9385e10f;
 // Color 为白色，但仍显式参与辉光染色公式。
 constexpr float kBloomColor[3] = {1.0f, 1.0f, 1.0f};
-// 金字塔最小边长取 2；宽度为 1 时四点采样会退化为同一纹理像素，不再增加信息。
-constexpr int kBloomMinSize = 2;
 
 // 效果层 Region 使用全局逻辑坐标，离屏纹理使用左上角为原点的纹理像素坐标。
 // 区域映射统一向外取整，避免裁掉辉光采样核的有效贡献。
@@ -102,6 +100,50 @@ Region mapGlobalRegionToTexture(const Region &globalRegion, const QRectF &output
     }
     return Region::fromUnsortedRects(mapped);
 }
+
+// Use one pixel grid for copying, background decoding and compositing. KWin's
+// scaledRenderRect is in projection coordinates and can differ by a pixel from
+// the real attachment when fractional output origins and extents are rounded.
+class OutputPixelGrid
+{
+public:
+    OutputPixelGrid(const RenderViewport &viewport, QSize size)
+        : m_rect(viewport.scaledRenderRect())
+        , m_size(size)
+        , m_scale(viewport.scale())
+    {
+    }
+
+    Region map(const Region &logical) const
+    {
+        const double sx = double(m_size.width()) / m_rect.width();
+        const double sy = double(m_size.height()) / m_rect.height();
+        const Rect bounds(QPoint(), m_size);
+        QList<Rect> pixels;
+        pixels.reserve(logical.rects().size());
+        for (const Rect &area : logical.rects()) {
+            const Rect relative = area.scaled(m_scale).rounded().translated(-m_rect.topLeft());
+            const Rect rect = RectF(relative.x() * sx, relative.y() * sy,
+                                    relative.width() * sx, relative.height() * sy)
+                                  .rounded().intersected(bounds);
+            if (!rect.isEmpty()) {
+                pixels.append(rect);
+            }
+        }
+        return Region::fromUnsortedRects(pixels);
+    }
+
+    QPointF project(int x, int y) const
+    {
+        return QPointF(m_rect.x() + double(x) * m_rect.width() / m_size.width(),
+                       m_rect.y() + double(y) * m_rect.height() / m_size.height());
+    }
+
+private:
+    Rect m_rect;
+    QSize m_size;
+    double m_scale;
+};
 
 Region mapTextureRegion(const Region &sourceRegion, const QSize &sourceSize,
                         const QSize &destinationSize, int haloTexels)
@@ -435,32 +477,34 @@ std::unique_ptr<GLTexture> GPURenderer::loadTexture(const char *assetName, GLenu
         return nullptr;
     }
 
-    // 保留原有 Alpha 上传语义，并确保采样时硬件执行 sRGB 解码。
+    // 直通 Alpha 与 Unity 相同，采样时由硬件执行 sRGB 解码。
     auto tex = baclickfx::uploadSrgbTexture(img);
     if (!tex || tex->isNull()) {
         GPU_ERROR() << "code=texture_alloc_failed" << "path=" << path;
         return nullptr;
     }
 
-    // Unity .meta 中 filterMode=1 且 enableMipMap=0，对应线性过滤且不生成多级纹理。
+    // 原 PC Texture2D 的 FilterMode=1、MipCount=1：线性过滤且不生成多级纹理。
     tex->setFilter(GL_LINEAR);
     tex->setWrapMode(wrapMode);
     return tex;
 }
 
-bool GPURenderer::prepareTargets(const RenderViewport &viewport)
+bool GPURenderer::prepareTargets(const RenderTarget &renderTarget, const RenderViewport &viewport)
 {
     // 显式按分量转换 KWin::RectF，后续几何计算统一使用 QRectF 的边界语义。
     const RectF rr = viewport.renderRect();
     const QRectF outputRect(rr.x(), rr.y(), rr.width(), rr.height());
     const double scale = viewport.scale();
 
-    // 使用 KWin 已缩放并取整的 scaledRenderRect()，确保纹理尺寸与投影矩阵一致。
+    // 投影矩形采用 KWin 的缩放取整坐标，采样网格则以实际附件像素为准。
+    // RenderViewport 的投影在两个方向各留出 renderOffset 指定的边距。
     const Rect sr = viewport.scaledRenderRect();
-    const QSize devicePx(sr.width(), sr.height());
-    const QSize renderTargetDevicePx = viewport.deviceSize();
+    const QPoint offset = viewport.renderOffset();
+    const QSize devicePx = renderTarget.transformedSize() - QSize(2 * offset.x(), 2 * offset.y());
+    const QSize renderTargetDevicePx = renderTarget.size();
     const int transformKind = int(viewport.transform().kind());
-    if (devicePx.isEmpty()) {
+    if (devicePx.isEmpty() || sr.isEmpty()) {
         return false;
     }
 
@@ -468,6 +512,7 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
     for (auto it = m_outputs.begin(); it != m_outputs.end(); ++it) {
         const auto &t = *it;
         if (t->renderRect == outputRect && qFuzzyCompare(t->scale, scale)
+            && t->devicePx == devicePx
             && t->renderTargetDevicePx == renderTargetDevicePx
             && t->transformKind == transformKind) {
             m_current = t.get();
@@ -489,6 +534,8 @@ bool GPURenderer::prepareTargets(const RenderViewport &viewport)
 
     auto targets = std::make_unique<OutputTargets>();
     targets->renderRect = outputRect;
+    targets->textureRect = QRectF(sr.x() / scale, sr.y() / scale,
+                                  sr.width() / scale, sr.height() / scale);
     targets->scale = scale;
     targets->devicePx = devicePx;
     targets->renderTargetDevicePx = renderTargetDevicePx;
@@ -564,11 +611,8 @@ bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devic
     const baclickfx::BloomPyramidParams params = baclickfx::bloomPyramidParams(s);
     targets.bloomSampleScale = params.sampleScale;
 
-    // 各级尺寸逐次减半；kBloomMinSize 作为极小输出的保护条件。
+    // Unity 即使短边降到 1 也保留 Diffusion 指定的层数。
     for (int i = 0; i < params.iterations; i++) {
-        if (s.width() < kBloomMinSize || s.height() < kBloomMinSize) {
-            break;
-        }
 
         BloomLevel level;
         level.size = s;
@@ -601,7 +645,8 @@ bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devic
         }
 
         targets.bloomLevels.push_back(std::move(level));
-        s = QSize(s.width() / 2, s.height() / 2);
+        s = QSize(s.width() >= 4 ? s.width() / 2 : 1,
+                  s.height() >= 4 ? s.height() / 2 : 1);
     }
 
     return !targets.bloomLevels.empty();
@@ -752,7 +797,7 @@ void GPURenderer::finishGpuTimingFrame(bool publishable)
     m_activeTimerPhase = -1;
 }
 
-void GPURenderer::setTransferFunctionUniforms(GLShader *shader, const RenderTarget &renderTarget)
+void GPURenderer::setColorSpaceUniforms(GLShader *shader, const RenderTarget &renderTarget, bool toWorkingSpace)
 {
     // KWin 的颜色空间统一变量仅适用于 ShaderManager::generateShader() 生成的程序。
     // 本项目直接加载 GLSL 源码，因此显式传入所需的传递函数参数。
@@ -766,6 +811,13 @@ void GPURenderer::setTransferFunctionUniforms(GLShader *shader, const RenderTarg
                                  float(cd.referenceLuminance())));
     // BT.1886 参数始终初始化；其他传递函数不会执行对应分支。
     shader->setUniform("u_tfBt1886", QVector2D(float(tf.bt1886A()), float(tf.bt1886B())));
+    QMatrix4x4 colorMatrix; // BT.709 输出保持严格单位矩阵。
+    if (cd.containerColorimetry() != Colorimetry::BT709) {
+        colorMatrix = toWorkingSpace
+            ? cd.containerColorimetry().relativeColorimetricTo(Colorimetry::BT709)
+            : Colorimetry::BT709.relativeColorimetricTo(cd.containerColorimetry());
+    }
+    shader->setUniform("u_colorMatrix", colorMatrix);
 }
 
 bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewport &viewport,
@@ -780,6 +832,8 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
     glGetIntegerv(GL_BLEND_DST_RGB, &m_savedBlendDstRgb);
     glGetIntegerv(GL_BLEND_SRC_ALPHA, &m_savedBlendSrcAlpha);
     glGetIntegerv(GL_BLEND_DST_ALPHA, &m_savedBlendDstAlpha);
+    glGetIntegerv(GL_BLEND_EQUATION_RGB, &m_savedBlendEquationRgb);
+    glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &m_savedBlendEquationAlpha);
     glGetIntegerv(GL_VIEWPORT, m_savedViewport);
     m_savedScissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
     glGetIntegerv(GL_SCISSOR_BOX, m_savedScissorBox);
@@ -869,23 +923,15 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         }
     }
 
+    const OutputPixelGrid pixelGrid(viewport, m_current->devicePx);
+    const Region importPixels = pixelGrid.map(importRegion);
     if (!directImport) {
-        // 无可采样纹理时保留 framebuffer blit fallback。复制必须发生在绑定私有 HDR
-        // 帧缓冲之前，避免从错误的 framebuffer 读取。
-        QList<Rect> importedRects;
-        importedRects.reserve(importRegion.rects().size());
-        for (const Rect &logicalRect : importRegion.rects()) {
-            const QRect aligned = QRect(logicalRect.x(), logicalRect.y(),
-                                        logicalRect.width(), logicalRect.height())
-                                      .intersected(outRect.toAlignedRect());
-            if (aligned.isEmpty()) {
-                continue;
-            }
-            const Rect srcLogical(aligned.x(), aligned.y(), aligned.width(), aligned.height());
-            const Rect scaledSource = srcLogical.scaled(viewport.scale()).rounded();
-            const Rect dstDevice = scaledSource.translated(-viewport.scaledRenderRect().topLeft());
-            if (!m_current->bgFbo->blitFromRenderTarget(renderTarget, viewport,
-                                                        srcLogical, dstDevice)) {
+        // 使用已经对齐的设备像素做一对一复制，避免从逻辑坐标再次取整。
+        const RenderViewport copyViewport(
+            RectF(0, 0, m_current->devicePx.width(), m_current->devicePx.height()),
+            1.0, renderTarget, viewport.renderOffset());
+        for (const Rect &pixels : importPixels.rects()) {
+            if (!m_current->bgFbo->blitFromRenderTarget(renderTarget, copyViewport, pixels, pixels)) {
                 static bool warned = false;
                 if (!warned) {
                     warned = true;
@@ -899,9 +945,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
                            m_savedViewport[2], m_savedViewport[3]);
                 return false;
             }
-            importedRects.append(srcLogical);
         }
-        importRegion = Region::fromUnsortedRects(importedRects);
     }
 
     // 绑定输出局部 HDR 帧缓冲。
@@ -916,10 +960,10 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
 
     // 投影矩阵将输出局部逻辑坐标映射到标准化设备坐标。交换 bottom/top 使 y 轴
     // 向下，与 Qt 坐标系一致；背景解码和粒子几何共用该矩阵。
-    const RectF rr = viewport.renderRect();
+    const QRectF grid = m_current->textureRect.translated(-outRect.topLeft());
     m_projection.setToIdentity();
-    m_projection.ortho(0.0f, static_cast<float>(rr.width()),
-                       static_cast<float>(rr.height()), 0.0f,
+    m_projection.ortho(float(grid.left()), float(grid.right()),
+                       float(grid.bottom()), float(grid.top()),
                        -1.0f, 1.0f);
 
     // ── 第 2 步：将背景解码到线性 HDR 场景纹理 ─────────────────────────────
@@ -930,7 +974,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         GLShader *bg = m_shaderBackground.get();
         ShaderManager::instance()->pushShader(bg);
         bg->setUniform("u_projection", m_projection);
-        setTransferFunctionUniforms(bg, renderTarget);
+        setColorSpaceUniforms(bg, renderTarget, true);
 
         glActiveTexture(GL_TEXTURE0);
         GLTexture *backgroundSource = directImport ? sourceTexture : m_current->bgTexture.get();
@@ -948,32 +992,29 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         // 背景导入和最终合成必须使用相同映射。
         std::vector<ParticleVertex> &quads = m_regionQuads;
         quads.clear();
-        quads.reserve(std::size_t(importRegion.rects().size()) * 6);
+        quads.reserve(std::size_t(importPixels.rects().size()) * 6);
         const QSize sourceSize = backgroundSource->size();
-        const auto directUv = [&](const QPointF &logical) {
-            // 旋转输出的实际 RenderTarget 可能交换宽高。先映射到实际目标，
-            // 再显式转换为 OpenGL 左下原点 UV，避免同时叠加 KWin 变换和纹理矩阵。
-            const QPointF p = viewport.mapToRenderTarget(logical);
-            return QPointF(p.x() / sourceSize.width(),
-                           1.0 - p.y() / sourceSize.height());
+        const double scale = viewport.scale();
+        const QMatrix4x4 sourceProjection = viewport.projectionMatrix();
+        const auto backgroundUv = [&](int x, int y) {
+            if (!directImport) {
+                return QPointF(double(x) / sourceSize.width(), 1.0 - double(y) / sourceSize.height());
+            }
+            // 直接使用最终合成的投影和视口，将实际输出像素反向采回私有纹理。
+            const QPointF p = pixelGrid.project(x, y);
+            const QVector4D clip = sourceProjection * QVector4D(float(p.x()), float(p.y()), 0, 1);
+            return QPointF(((clip.x() + 1.0) * .5 * m_savedViewport[2] + m_savedViewport[0]) / sourceSize.width(),
+                           ((clip.y() + 1.0) * .5 * m_savedViewport[3] + m_savedViewport[1]) / sourceSize.height());
         };
-        for (const Rect &rect : importRegion.rects()) {
-            const float l = static_cast<float>(rect.left() - outRect.left());
-            const float r = static_cast<float>(rect.right() - outRect.left());
-            const float t = static_cast<float>(rect.top() - outRect.top());
-            const float b = static_cast<float>(rect.bottom() - outRect.top());
-            const QPointF uvLT = directImport
-                ? directUv(QPointF(rect.left(), rect.top()))
-                : QPointF(l / outRect.width(), 1.0 - t / outRect.height());
-            const QPointF uvRT = directImport
-                ? directUv(QPointF(rect.right(), rect.top()))
-                : QPointF(r / outRect.width(), 1.0 - t / outRect.height());
-            const QPointF uvLB = directImport
-                ? directUv(QPointF(rect.left(), rect.bottom()))
-                : QPointF(l / outRect.width(), 1.0 - b / outRect.height());
-            const QPointF uvRB = directImport
-                ? directUv(QPointF(rect.right(), rect.bottom()))
-                : QPointF(r / outRect.width(), 1.0 - b / outRect.height());
+        for (const Rect &pixels : importPixels.rects()) {
+            const QPointF tl = pixelGrid.project(pixels.left(), pixels.top()) / scale - outRect.topLeft();
+            const QPointF br = pixelGrid.project(pixels.right(), pixels.bottom()) / scale - outRect.topLeft();
+            const float l = float(tl.x()), r = float(br.x());
+            const float t = float(tl.y()), b = float(br.y());
+            const QPointF uvLT = backgroundUv(pixels.left(), pixels.top());
+            const QPointF uvRT = backgroundUv(pixels.right(), pixels.top());
+            const QPointF uvLB = backgroundUv(pixels.left(), pixels.bottom());
+            const QPointF uvRB = backgroundUv(pixels.right(), pixels.bottom());
             quads.insert(quads.end(), {
                 {l, b, float(uvLB.x()), float(uvLB.y()), 1, 1, 1, 1},
                 {r, b, float(uvRB.x()), float(uvRB.y()), 1, 1, 1, 1},
@@ -995,6 +1036,7 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
     //
     // 默认使用首个 Ring 图层的 One/OneMinusSrcAlpha 状态。
     glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     switchGpuTimerPhase(GpuTimerPhase::Particle);
     return true;
@@ -1072,14 +1114,18 @@ void GPURenderer::setVertexLayout(const ShaderSet &set)
 
 void GPURenderer::renderClickBase(const ClickInstance &inst, const QPointF &outputOrigin)
 {
-    const double ageSec = inst.age;
     const QPointF local = inst.center - outputOrigin;
     const double cx = local.x();
     const double cy = local.y();
 
-    // 两个图层的材质队列均为 3000，同队列内保持 Prefab 子对象顺序。
-    renderRing(cx, cy, inst.ring, ageSec);
-    renderTriBurstGeometry(cx, cy, inst.ring3, ageSec, true);
+    renderRing(cx, cy, inst.ring);
+}
+
+void GPURenderer::renderClickAdditive(const ClickInstance &inst, const QPointF &outputOrigin)
+{
+    const QPointF local = inst.center - outputOrigin;
+    const double cx = local.x(), cy = local.y();
+    renderTriBurstGeometry(cx, cy, inst.ring3, true);
 }
 
 void GPURenderer::renderClickMeshTri(const ClickInstance &inst,
@@ -1087,13 +1133,13 @@ void GPURenderer::renderClickMeshTri(const ClickInstance &inst,
                                      const QPointF &outputOrigin)
 {
     const QPointF local = inst.center - outputOrigin;
-    renderMeshTri(local.x(), local.y(), inst.meshTri, inst.age, mesh);
+    renderMeshTri(local.x(), local.y(), inst.meshTri, mesh);
 }
 
 void GPURenderer::renderTriBurst(const TriBurstInstance &inst, const QPointF &outputOrigin)
 {
     const QPointF local = inst.center - outputOrigin;
-    renderTriBurstGeometry(local.x(), local.y(), inst.burst, inst.age, false);
+    renderTriBurstGeometry(local.x(), local.y(), inst.burst, false);
 }
 
 void GPURenderer::flushTriBursts()
@@ -1114,143 +1160,30 @@ void GPURenderer::renderTrail(const std::vector<StrokeData> &strokes,
 
     const double hdrGain = std::max(1.0, params.hdrGain);
 
-    // TrailRenderer.colorGradient 沿轨迹求值：t=0 为笔头，t=1 为笔尾。
-
+    // 原生带状网格包含端帽、转角及退化连接点，统一展开为三角形。
+    // 不额外叠加转角扇面，否则加法混合会把连接处重复提亮。
     for (const StrokeData &stroke : strokes) {
-        const std::vector<StrokeSample> &s = stroke.samples;
-        const std::size_t n = s.size();
-
-        // 保持原有浮点运算顺序：先转换为输出局部坐标，再求相邻点方向。
-        m_trailLocalSamples.resize(n);
-        for (std::size_t i = 0; i < n; i++) {
-            m_trailLocalSamples[i] = s[i].pos - outputOrigin;
-        }
-        const std::vector<QPointF> &local = m_trailLocalSamples;
-
-        // 使用角平分法线构造主带；转角外侧由 numCornerVertices 扇面补齐，且仅与
-        // 主带共边，避免加法混合区域重叠。
-        m_trailNormals.resize(n);
-        m_trailDirs.resize(n > 1 ? n - 1 : 0);
-        std::vector<QPointF> &normals = m_trailNormals;
-        std::vector<QPointF> &dirs = m_trailDirs;
-        m_trailStyles.resize(n);
-        for (std::size_t i = 0; i < n; i++) {
-            m_trailStyles[i] = TrailVertexStyle{
-                s[i].width * 0.5,
-                static_cast<float>(s[i].color[0] * hdrGain),
-                static_cast<float>(s[i].color[1] * hdrGain),
-                static_cast<float>(s[i].color[2] * hdrGain),
-                static_cast<float>(s[i].alpha),
-            };
-        }
-        std::copy(stroke.directions.begin(), stroke.directions.end(), dirs.begin());
-        for (std::size_t i = 0; i < n; i++) {
-            normals[i] = stroke.normals[i];
-        }
-
-        // 每段由两个三角形组成。顶点色沿轨迹渐变，HDR 倍率已预乘到 RGB。
-        std::vector<ParticleVertex> &strip = m_trailStrip;
-        strip.clear();
-        const int cornerVertices = std::max(0, params.numCornerVertices);
-        const int capVertices = std::max(0, params.numCapVertices);
-        const std::size_t cornerTriangles = n > 2
-            ? (n - 2) * static_cast<std::size_t>(cornerVertices + 1) : 0;
-        const std::size_t capTriangles = dirs.empty() || capVertices == 0
-            ? 0 : 2 * static_cast<std::size_t>(capVertices + 1);
-        strip.reserve((n - 1) * 6 + cornerTriangles * 3 + capTriangles * 3);
-
-        const auto vertexAtOffset = [&](std::size_t i, const QPointF &offset,
-                                        double textureV) {
-            // 宽度使用 Unity 参数的直接换算值：
-            // widthMultiplier 0.005 × widthCurve(恒 1.0) 经 Subsystem 投影换算后，
-            // TrailRenderer_13 的 Transform_12 localScale 也是 1.0，不存在其他缩放因子。
-            const TrailVertexStyle &style = m_trailStyles[i];
+        const auto &ribbon = stroke.ribbon;
+        if (ribbon.size() < 3) continue;
+        auto &vertices = m_trailStrip;
+        vertices.clear();
+        vertices.reserve((ribbon.size() - 2) * 3);
+        const QPointF origin = stroke.ribbonOrigin - outputOrigin;
+        const auto vertex = [&](std::size_t index) {
+            const auto &v = ribbon[index];
+            const auto &sample = stroke.samples[stroke.samples.size() - 1 - v.sample];
             return ParticleVertex{
-                static_cast<float>(local[i].x() + offset.x() * style.halfWidth),
-                static_cast<float>(local[i].y() + offset.y() * style.halfWidth),
-                // u 沿轨迹长度，v 横跨拖尾宽度；纹理自身提供横向软边。
-                static_cast<float>(s[i].textureU), static_cast<float>(textureV),
-                style.r, style.g, style.b, style.a,
-            };
+                float(origin.x() + double(v.position[0]) * params.worldUnitPx),
+                float(origin.y() - double(v.position[1]) * params.worldUnitPx), v.u, v.v,
+                float(sample.color[0] * hdrGain), float(sample.color[1] * hdrGain),
+                float(sample.color[2] * hdrGain), float(sample.alpha)};
         };
-
-        const auto vertexAtNormal = [&](std::size_t i, const QPointF &normal, double side) {
-            return vertexAtOffset(i, normal * side, side > 0 ? 0.0 : 1.0);
-        };
-
-        const auto vertexAt = [&](std::size_t i, double side) {
-            return vertexAtNormal(i, normals[i], side);
-        };
-
-        for (std::size_t i = 0; i + 1 < n; i++) {
-            const ParticleVertex a = vertexAt(i, 1.0);
-            const ParticleVertex b = vertexAt(i, -1.0);
-            const ParticleVertex c = vertexAt(i + 1, 1.0);
-            const ParticleVertex d = vertexAt(i + 1, -1.0);
-            strip.push_back(a);
-            strip.push_back(b);
-            strip.push_back(c);
-            strip.push_back(b);
-            strip.push_back(d);
-            strip.push_back(c);
+        for (std::size_t i = 2; i < ribbon.size(); ++i) {
+            vertices.push_back(vertex(i - 2));
+            vertices.push_back(vertex(i % 2 ? i : i - 1));
+            vertices.push_back(vertex(i % 2 ? i - 1 : i));
         }
-
-        // TrailRenderer_13 的 numCornerVertices 为 4。转角外侧使用以角平分外点
-        // 为锚的三角扇补齐，边界仅与主带共边。
-        for (std::size_t i = 1; i + 1 < n && cornerVertices > 0; i++) {
-            const QPointF dIn = dirs[i - 1];
-            const QPointF dOut = dirs[i];
-            const QPointF nIn(-dIn.y(), dIn.x());
-            const QPointF nOut(-dOut.y(), dOut.x());
-            const double cross = dIn.x() * dOut.y() - dIn.y() * dOut.x();
-            if (std::abs(cross) < 1e-6) {
-                continue;
-            }
-            const double side = cross > 0.0 ? -1.0 : 1.0;
-            const double theta = std::atan2(nIn.x() * nOut.y() - nIn.y() * nOut.x(),
-                                            nIn.x() * nOut.x() + nIn.y() * nOut.y());
-            const ParticleVertex anchor = vertexAt(i, side);
-            QPointF prev = nIn;
-            for (int j = 1; j <= cornerVertices + 1; j++) {
-                const double a = theta * (double(j) / (cornerVertices + 1));
-                const double ca = std::cos(a);
-                const double sa = std::sin(a);
-                const QPointF next(nIn.x() * ca - nIn.y() * sa,
-                                   nIn.x() * sa + nIn.y() * ca);
-                strip.push_back(anchor);
-                strip.push_back(vertexAtNormal(i, prev, side));
-                strip.push_back(vertexAtNormal(i, next, side));
-                prev = next;
-            }
-        }
-
-        // numCapVertices 为 1：首尾分别沿反向和正向切线生成半圆端帽。
-        if (capVertices > 0 && !dirs.empty()) {
-            const auto addCap = [&](std::size_t i, const QPointF &dir, bool startCap) {
-                const QPointF normal(-dir.y(), dir.x());
-                const double baseAngle = std::atan2(normal.y(), normal.x());
-                const double sweep = startCap ? M_PI : -M_PI;
-                const ParticleVertex center = vertexAtOffset(i, QPointF(0, 0), 0.5);
-                QPointF previous = normal;
-                for (int j = 1; j <= capVertices + 1; j++) {
-                    const double angle = baseAngle
-                        + sweep * (static_cast<double>(j) / (capVertices + 1));
-                    const QPointF next(std::cos(angle), std::sin(angle));
-                    const double prevV = 0.5 - 0.5
-                        * (previous.x() * normal.x() + previous.y() * normal.y());
-                    const double nextV = 0.5 - 0.5
-                        * (next.x() * normal.x() + next.y() * normal.y());
-                    strip.push_back(center);
-                    strip.push_back(vertexAtOffset(i, previous, prevV));
-                    strip.push_back(vertexAtOffset(i, next, nextV));
-                    previous = next;
-                }
-            };
-            addCap(0, dirs.front(), true);
-            addCap(n - 1, dirs.back(), false);
-        }
-
-        appendVertices(strip);
+        appendVertices(vertices);
     }
 
     // 拖尾材质使用 BaTouchAdditive.shader 的 One/One 加法混合，RGB 和透明度使用
@@ -1268,6 +1201,7 @@ void GPURenderer::restoreBlendState()
 
     glBlendFuncSeparate(m_savedBlendSrcRgb, m_savedBlendDstRgb,
                         m_savedBlendSrcAlpha, m_savedBlendDstAlpha);
+    glBlendEquationSeparate(m_savedBlendEquationRgb, m_savedBlendEquationAlpha);
     if (m_savedBlendEnabled) {
         glEnable(GL_BLEND);
     } else {
@@ -1344,7 +1278,7 @@ bool GPURenderer::renderBloom(const Region &globalChangedRegion)
     std::vector<Region> &downRegions = m_current->downRegions;
     std::vector<Region> &upRegions = m_current->upRegions;
     Region changedInHdr = mapGlobalRegionToTexture(globalChangedRegion,
-                                                    m_current->renderRect,
+                                                    m_current->textureRect,
                                                     m_current->devicePx, 0);
     downRegions[0] = mapTextureRegion(changedInHdr, m_current->devicePx,
                                       levels[0].size, 1);
@@ -1455,33 +1389,11 @@ bool GPURenderer::renderBloom(const Region &globalChangedRegion)
     return true;
 }
 
-void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                           const Region &requestedCompositeRegion,
-                           const Region &requestedBloomSourceRegion)
+bool GPURenderer::updateBloom(const RenderTarget &renderTarget, const Region &requestedBloomSourceRegion)
 {
     Q_ASSERT(m_current);
-
-    // 粒子提交完成后闭合粒子阶段；辉光查询在区域运算完成且即将提交时开始。
     endGpuTimerPhase();
-
-    // 返回 KWin 输出帧缓冲。
-    GLFramebuffer::popFramebuffer();
-    // 私有 HDR 帧缓冲使用输出局部视口，返回 KWin 输出目标后恢复入口视口。
-    glViewport(m_savedViewport[0], m_savedViewport[1],
-               m_savedViewport[2], m_savedViewport[3]);
-
-    // 合成区域使用全局逻辑坐标，先与当前输出求交；空区域可跳过整条辉光和合成链。
-    const QRectF &out = m_current->renderRect;
-    const Rect outputLogical = alignedLogicalRect(out);
-    const Region compositeRegion = requestedCompositeRegion.intersected(outputLogical);
-    if (compositeRegion.isEmpty()) {
-        // 每条返回路径都必须闭合计时查询，避免下一帧 glBeginQuery() 失败。
-        finishGpuTimingFrame(false);
-        restoreVertexState();
-        restoreBlendState();
-        return;
-    }
-
+    const Rect outputLogical = alignedLogicalRect(m_current->renderRect);
     // 辉光在最终合成前执行，并从当前与上一帧原始亮源区域的并集开始传播。当前区域
     // 更新新增或移动的亮源，上一帧区域清除消失的亮源；各级采样核在 renderBloom()
     // 内继续外扩。
@@ -1497,7 +1409,34 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     }
     beginGpuTimerPhase(GpuTimerPhase::Bloom);
     const bool bloomOk = renderBloom(bloomUpdateRegion);
+    m_current->previousBloomSourceRegion = currentBloomSource;
     switchGpuTimerPhase(GpuTimerPhase::Composite);
+    return bloomOk;
+}
+
+void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                           const Region &requestedCompositeRegion,
+                           bool bloomOk)
+{
+    Q_ASSERT(m_current);
+
+    // 返回 KWin 输出帧缓冲。
+    GLFramebuffer::popFramebuffer();
+    // 私有 HDR 帧缓冲使用输出局部视口，返回 KWin 输出目标后恢复入口视口。
+    glViewport(m_savedViewport[0], m_savedViewport[1],
+               m_savedViewport[2], m_savedViewport[3]);
+
+    // 合成区域使用全局逻辑坐标，先与当前输出求交；空区域可跳过合成。
+    const QRectF &out = m_current->renderRect;
+    const Rect outputLogical = alignedLogicalRect(out);
+    const Region compositeRegion = requestedCompositeRegion.intersected(outputLogical);
+    if (compositeRegion.isEmpty()) {
+        // 每条返回路径都必须闭合计时查询，避免下一帧 glBeginQuery() 失败。
+        finishGpuTimingFrame(false);
+        restoreVertexState();
+        restoreBlendState();
+        return;
+    }
 
     // 最终合成执行 main + bloom * intensity * color，并按输出传递函数编码。HDR
     // 场景纹理已包含桌面和全部粒子，因此使用覆盖写。
@@ -1506,7 +1445,7 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     ShaderManager::instance()->pushShader(composite);
     composite->setUniform("u_projection", viewport.projectionMatrix());
     // 编码参数必须与 beginFrame() 的解码参数一致，以保持桌面颜色往返不变。
-    setTransferFunctionUniforms(composite, renderTarget);
+    setColorSpaceUniforms(composite, renderTarget, false);
 
     glActiveTexture(GL_TEXTURE0);
     m_current->hdrTexture->bind();
@@ -1541,21 +1480,23 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     // RenderViewport::projectionMatrix() 已经包含 OutputTransform，顶点保持缩放后的
     // 全局逻辑坐标即可。这里若再调用 mapToRenderTarget()，旋转会被应用两次，90°
     // 输出最终表现为特效位置与鼠标上下镜像。
-    const float scale = static_cast<float>(viewport.scale());
+    const OutputPixelGrid pixelGrid(viewport, m_current->devicePx);
+    const Region compositePixels = pixelGrid.map(compositeRegion);
+    const QSize size = m_current->devicePx;
 
-    // 投影坐标 y 轴向下，而私有帧缓冲纹理坐标 y 轴向上，因此逻辑顶边对应 v=1。
+    // 投影坐标 y 轴向下，私有帧缓冲纹理坐标 y 轴向上。
     std::vector<ParticleVertex> &quads = m_regionQuads;
     quads.clear();
-    quads.reserve(std::size_t(compositeRegion.rects().size()) * 6);
-    for (const Rect &area : compositeRegion.rects()) {
-        const float l = static_cast<float>(area.left()) * scale;
-        const float r = static_cast<float>(area.right()) * scale;
-        const float t = static_cast<float>(area.top()) * scale;
-        const float b = static_cast<float>(area.bottom()) * scale;
-        const float uL = static_cast<float>((area.left() - out.left()) / out.width());
-        const float uR = static_cast<float>((area.right() - out.left()) / out.width());
-        const float vT = static_cast<float>(1.0 - (area.top() - out.top()) / out.height());
-        const float vB = static_cast<float>(1.0 - (area.bottom() - out.top()) / out.height());
+    quads.reserve(std::size_t(compositePixels.rects().size()) * 6);
+    for (const Rect &pixels : compositePixels.rects()) {
+        const QPointF tl = pixelGrid.project(pixels.left(), pixels.top());
+        const QPointF br = pixelGrid.project(pixels.right(), pixels.bottom());
+        const float l = float(tl.x()), r = float(br.x());
+        const float t = float(tl.y()), b = float(br.y());
+        const float uL = float(pixels.left()) / size.width();
+        const float uR = float(pixels.right()) / size.width();
+        const float vT = 1.0f - float(pixels.top()) / size.height();
+        const float vB = 1.0f - float(pixels.bottom()) / size.height();
         quads.insert(quads.end(), {
             {l, b, uL, vB, 1, 1, 1, 1},
             {r, b, uR, vB, 1, 1, 1, 1},
@@ -1576,7 +1517,6 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
     ShaderManager::instance()->popShader();
 
     m_current->previousCompositeRegion = compositeRegion;
-    m_current->previousBloomSourceRegion = currentBloomSource;
 
     finishGpuTimingFrame(true);
     restoreVertexState();
@@ -1587,19 +1527,19 @@ void GPURenderer::endFrame(const RenderTarget &renderTarget, const RenderViewpor
 
 // ===== 粒子几何生成 ==========================================================
 
-void GPURenderer::renderRing(double cx, double cy, const RingEmission &sub, double ageSec)
+void GPURenderer::renderRing(double cx, double cy, const RingEmission &sub)
 {
-    const double progress = layerProgress(sub.durationSec, ageSec);
+    const double progress = particleProgress(sub.percentAge);
     if (progress >= 1.0) {
         return;
     }
 
     const double curve = baclickfx::subSizeCurve(sub.params, progress);
     const baclickfx::Rgba col = baclickfx::subColor(sub.params, progress);
-    // SizeModule multiplier=2 与 Billboard 边长到半宽的除 2 相抵。
-    const double radius = sub.params.sizePx * std::max(0.0, curve);
+    // SizeModule multiplier 已包含在 curve 中；Billboard 边长转半宽。
+    const double radius = baclickfx::billboardHalfSize(sub.params, sub.startSize, float(curve), sub.percentAge);
 
-    // Unity 着色器公式：tex.rgb * v_color.rgb * v_color.a。
+    // Unity RGB 公式：tex.rgb * v_color.rgb * tex.r；顶点 Alpha 仅控制目标衰减。
     // _Color HDR = 2.0，已预乘进 v_color。
     const double hdrGain = sub.params.hdrGain;
     const float r = col.r * hdrGain;
@@ -1645,9 +1585,9 @@ void GPURenderer::renderRing(double cx, double cy, const RingEmission &sub, doub
 }
 
 void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub,
-                                double ageSec, const baclickfx::CylinderProfile &profile)
+                                const baclickfx::CylinderProfile &profile)
 {
-    const double progress = layerProgress(sub.durationSec, ageSec);
+    const double progress = particleProgress(sub.percentAge);
     if (progress >= 1.0) {
         return;
     }
@@ -1656,7 +1596,7 @@ void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub
     // 剖分及逐角纹理坐标，以保留 Unity Mesh Particle Renderer 的接缝和插值行为。
 
     for (const MeshTriArc &item : sub.arcs) {
-        const double localP = baclickfx::clamp(progress + item.phase * 0.08, 0.0, 1.0);
+        const double localP = progress;
         const double curve = baclickfx::subSizeCurve(sub.params, localP);
         const baclickfx::Rgba col = baclickfx::subColor(sub.params, localP);
 
@@ -1666,23 +1606,20 @@ void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub
         // Grad_Ring3 的透明度沿 u 呈钟形，因此溶解从两端同时推进。此处仅写入顶点
         // 数据，实际裁剪由 dissolve.frag 完成。
         const double custom0 = meshTriCustom0(sub, localP);
-        // 旋转角由角速度曲线的分段埃尔米特解析积分得到。
-        const double start = item.angle + meshTriRotation(sub, localP, item.rotMix);
+        // World 模拟空间的旋转角由 advanceMeshTri 逐帧推进。
+        const double start = item.angle;
 
         // Unity 着色器公式：rgb = tex.rgb * Color_D20A2F66.rgb * vertexColor.rgb。
         // Color_D20A2F66 = 5.992157，预乘进顶点色。
         const double hdrGain = sub.params.hdrGain;
 
-        // MeshTri 的透明度曲线恒为 1，消退完全由着色器丢弃阈值控制。
-        const double energyBase = col.a;
-
-        const float cr = static_cast<float>(col.r * hdrGain * energyBase);
-        const float cg = static_cast<float>(col.g * hdrGain * energyBase);
-        const float cb = static_cast<float>(col.b * hdrGain * energyBase);
+        // RGB 保留直通颜色；源透明度只由 Dissolve 输出和 SrcAlpha 混合应用一次。
+        const float cr = static_cast<float>(col.r * hdrGain);
+        const float cg = static_cast<float>(col.g * hdrGain);
+        const float cb = static_cast<float>(col.b * hdrGain);
         const float ca = static_cast<float>(col.a);
         const float dissolve = static_cast<float>(custom0);
-        const double cosR = std::cos(start);
-        const double sinR = std::sin(start);
+        const double cosR = std::cos(start), sinR = std::sin(start);
 
         for (std::size_t fi = 0; fi < profile.mesh.faces.size(); fi++) {
             const baclickfx::Face &face = profile.mesh.faces[fi];
@@ -1695,17 +1632,16 @@ void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub
                     break;
                 }
                 const baclickfx::Vertex &p = profile.mesh.vertices[static_cast<std::size_t>(vi)];
-                const double sx = p[0] * baseRadius;
-                const double sy = p[1] * baseRadius;
+                const auto offset = baclickfx::unityObjPointOffset(p, baseRadius, cosR, sinR);
                 const auto uv = profile.mesh.faceUv(fi, corner);
                 if (!uv) {
                     valid = false;
                     break;
                 }
                 appendVertex({
-                    static_cast<float>(cx + sx * cosR - sy * sinR),
-                    static_cast<float>(cy + sx * sinR + sy * cosR),
-                    static_cast<float>((*uv)[0]), static_cast<float>((*uv)[1]),
+                    static_cast<float>(cx + offset[0]),
+                    static_cast<float>(cy + offset[1]),
+                    static_cast<float>((*uv)[0]), static_cast<float>(1.0 - (*uv)[1]),
                     cr, cg, cb, ca, dissolve,
                 });
             }
@@ -1723,11 +1659,10 @@ void GPURenderer::renderMeshTri(double cx, double cy, const MeshTriEmission &sub
     glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);  // 恢复帧内默认状态。
 }
 
-void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmission &sub,
-                                         double ageSec, bool flush)
+void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmission &sub, bool flush)
 {
     for (const TriParticle &item : sub.particles) {
-        const double progress = layerProgress(item.durationSec, ageSec);
+        const double progress = particleProgress(item.percentAge);
         if (progress >= 1.0) {
             continue;
         }
@@ -1735,16 +1670,12 @@ void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmi
         const double curve = baclickfx::subSizeCurve(sub.params, progress);
         const baclickfx::Rgba col = baclickfx::subColor(sub.params, progress);
 
-        // 出生位置与速度都沿 item.angle 的径向。
-        const double dist = item.speedPxPerSec * item.lifetimeSec * progress;
-        const double radius = sub.params.localScalePx * (sub.params.shapeScale + dist);
-        const double x = cx + std::cos(item.angle) * radius;
-        const double y = cy + std::sin(item.angle) * radius;
+        const QPointF offset = triParticleOffset(item, sub.params);
+        const double x = cx + offset.x();
+        const double y = cy + offset.y();
 
-        // Unity Billboard 的 startSize 表示四边形边长。PSR_20/21 的
-        // m_MaxParticleSize=0.5 远高于该图层可能达到的屏幕尺寸，因此无需额外钳制。
-        const double side = sub.params.sizePx * item.sizeMul * std::max(0.0, curve);
-        const double half = side * 0.5;
+        const double half = baclickfx::billboardHalfSize(sub.params, item.startSize,
+            float(curve), item.percentAge);
         // PS17/PS18 的起始旋转为 0 且未启用 RotationModule，朝向仅由图集帧决定。
         const double rot = item.orientBase + item.spin * progress;
 
@@ -1796,7 +1727,7 @@ void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmi
     }
 
     if (flush) {
-        // Ring3 仍在每个点击实例内紧跟 Ring 提交，保持 Unity 子对象顺序不变。
+        // Ring3 在队列 4499 完成后，以队列 4550 的纯加法材质提交。
         glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
         flushVertices(m_shaderAdditive, m_texTriangle.get());
         glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE,

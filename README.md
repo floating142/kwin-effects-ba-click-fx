@@ -18,7 +18,7 @@ English documentation: [README.en.md](README.en.md)
 - 线性 RGBA16F Scene、HDR 粒子混合与 Unity PPv2 MXFinalBloom
 - 稀疏 damage Region，仅导入、计算和合成本帧可能变化的区域
 - 支持多显示器、HiDPI 和不同输出缩放比例
-- 使用 KWin 指针事件保留高回报率鼠标的真实拖动轨迹
+- 使用 KWin 原生指针输入，按光标所在屏幕的实际呈现帧采样拖动轨迹
 - 提供 KCM 配置页、重绘区域标记和 CPU/GPU 分段性能日志
 - 设置页参数支持实时预览，点击应用后保存
 
@@ -172,9 +172,9 @@ qdbus-qt6 org.kde.KWin /Effects reconfigureEffect kwin4_effect_ba_click_fx
 每帧渲染顺序与 Unity UI Render Pass 对齐：
 
 1. 将本帧变化区域的桌面像素导入线性 RGBA16F Scene。
-2. 按 Unity Render Queue 顺序绘制 Trail、Ring/Ring3、Ring4 与 MeshTri。
+2. 绘制 UIAlwaysVisible 层的 Trail、Ring 和 MeshTri。
 3. 对真实亮源区域执行 PPv2 MXFinalBloom 金字塔。
-4. 将 Scene 与 Bloom 合成并编码回 KWin 输出传递函数。
+4. 以加法叠加 LetterBox 层的 Ring3 和 Ring4，再将 Scene 与 Bloom 合成并编码回 KWin 输出。
 
 FBO 与 Bloom 金字塔按输出复用；damage Region 只减少无变化 texel 的导入、传播和合成，不改变 Shader、采样核、几何、粒子参数或最终视觉结果。
 

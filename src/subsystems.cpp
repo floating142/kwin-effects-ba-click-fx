@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "subsystems.h"
+#include "touchparams.h"
 
 #include <algorithm>
 #include <cmath>
+#include <span>
+#include "unity/curve.h"
+#include "unity/billboard.h"
 
 namespace baclickfx {
 
@@ -23,7 +27,7 @@ constexpr ScalarStop kDefaultWidthCurve[] = {
 };
 
 // 补全可选字段并计算逻辑像素域派生量。
-void finalize(Subsystem &s, double ts, double gs, double worldUnitPx)
+void finalize(Subsystem &s, double ts, double worldUnitPx)
 {
     // MinMaxConstant 的端点未给出时退化为对应的标量本身。
     s.startLifetimeScalar = resolve(s.startLifetimeScalar, s.lifetimeSec);
@@ -43,227 +47,37 @@ void finalize(Subsystem &s, double ts, double gs, double worldUnitPx)
 
     s.lifetimeMs = static_cast<int>(std::max(16.0, jsRound((s.lifetimeSec * 1000) / ts)));
 
-    // localScale 同时作用于尺寸和速度；worldUnitPx 已包含输出高度和 globalScale。
+    // Renderer 尺寸包含局部缩放；World 速度由发射器另行计算。
     s.worldUnitPx = worldUnitPx;
-    s.localScalePx = s.localScale * worldUnitPx;
     s.sizePx = s.size * s.localScale * worldUnitPx;
-    s.speedPxPerSec = s.speed * s.localScale * worldUnitPx;
     s.widthPx = s.widthMultiplier * worldUnitPx;
     s.minVertexDistancePx = s.minVertexDistance * worldUnitPx;
     s.hdrGain = (s.hdrColor[0] + s.hdrColor[1] + s.hdrColor[2]) / 3;
-    (void)gs;
+    // ColorOverLifetime 缓存使用 uint16 时间和 RGBA8，不在浮点域直接乘色。
+    auto gradient = std::make_shared<unity::Gradient>();
+    const auto colors = s.colorKeys.empty() ? s.colorStops : s.colorKeys;
+    const auto alphas = s.alphaKeys.empty() ? s.alphaStops : s.alphaKeys;
+    gradient->enabled = !colors.empty();
+    for (std::size_t i = 0; i < colors.size; ++i) {
+        const auto &key = colors[i];
+        gradient->colors.push_back({std::uint16_t(std::lround(key.t * 65535)),
+            {float(key.c[0]), float(key.c[1]), float(key.c[2])}});
+    }
+    for (std::size_t i = 0; i < alphas.size; ++i) {
+        const auto &key = alphas[i];
+        gradient->alphas.push_back({std::uint16_t(std::lround(key.t * 65535)), float(key.v)});
+    }
+    gradient->prepareCache();
+    s.particleGradient = std::move(gradient);
 }
 
 } // namespace
 
-SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outputHeightPx)
+SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outputHeightPx, double outputWidthPx)
 {
     SubsystemMap m;
 
-    // FX_Touch (PS14) 不在表里：它是预制体根节点，发射模块与渲染器都关着，
-    // 材质槽全空，什么都不画。详见 clickinstance.h 顶部的说明。
-
-    // ===== ring (PS15)：点击处的单个扩散圆环 =====
-    {
-        Subsystem &s = m.ring;
-        // PSR_23 → FX_MAT_Touch_Cross2：_Color HDR = 2.0，queue 4499，
-        // shader FX_SHADER_AlphaBlend_Add (guid 62e46943)。
-        s.hdrColor = Rgb{2.0, 2.0, 2.0};
-        s.textureAsset = "FX_TEX_Circle_01.png";
-        s.textureClamp = true;
-        s.lifetimeSec = 0.2;
-        s.size = 0.12;
-        s.localScale = 1.0;
-        // PS15 InitialModule.startSize (mode=0, scalar=0.12)
-        s.startSizeMode = 0;
-        s.startSizeScalar = 0.11999999731779099;
-        s.startSizeMinScalar = 0.14000000059604645;
-        // PS15 InitialModule.startRotation (mode=3, random between 0 and 2PI)
-        s.startRotationMode = 3;
-        s.startRotationScalar = 6.283185005187988;
-        s.startRotationMinScalar = 0.0;
-        s.speed = 0.0;
-        s.rateOverDistance = 0.0;
-        s.clickBurst = 1;
-        s.sizeCurve = ScalarCurve(kRingSize);
-        s.colorStops = ColorCurve(kRingColor);
-        s.alphaStops = ScalarCurve(kRingAlpha);
-        s.shapeEnabled = false;
-        s.uvEnabled = false;
-    }
-
-    // ===== Ring(3) (PS18)：点击迸发的 4 个向外飞散圆环 =====
-    {
-        Subsystem &s = m.ring3;
-        // PSR_20 → FX_MAT_Touch_Tri 2：_Color HDR = 5.992157，queue 3000，
-        // shader FX_SHADER_Additive_0 (guid da9b7eae)，Blend One One 纯加法。
-        s.hdrColor = Rgb{5.992157, 5.992157, 5.992157};
-        // PS18 InitialModule.startColor = (0.5377358, 0.5377358, 0.5377358, 1)。
-        // Renderer 启用 Apply Active Color Space；该颜色在 subColor() 中解码。
-        s.startColor = Rgb{0.5377358, 0.5377358, 0.5377358};
-        s.textureAsset = "FX_TEX_Triangle_02_1.png";
-        s.textureClamp = true;
-        s.lifetimeSec = 0.6;
-        // PS18 InitialModule.startLifetime (mode=3, random between 0.6 and 0.7)
-        s.startLifetimeMode = 3;
-        s.startLifetimeScalar = 0.6000000238418579;
-        s.startLifetimeMinScalar = 0.699999988079071;
-        s.size = 0.2;
-        // Transform_7.m_LocalScale.x
-        s.localScale = 0.3078823983669281;
-        // PS18 InitialModule.startSpeed (mode=3, random between 0.3 and 0.4)
-        s.startSpeedMode = 3;
-        s.startSpeedScalar = 0.4000000059604645;
-        s.startSpeedMinScalar = 0.30000001192092896;
-        // PS18 InitialModule.startSize (mode=3, random between 0.1 and 0.2)
-        s.startSizeMode = 3;
-        s.startSizeScalar = 0.20000000298023224;
-        s.startSizeMinScalar = 0.10000000149011612;
-        s.speed = 0.4;
-        s.rateOverDistance = 0.0;
-        s.shapeScale = 0.30000001192092896;
-        // JSON (PS18) burst scalar=4.
-        s.clickBurst = 4;
-        s.sizeCurve = ScalarCurve(kRing3Size);
-        s.colorStops = ColorCurve(kRing3Color);
-        s.alphaStops = ScalarCurve(kRing3Alpha);
-        s.shapeEnabled = true;
-        s.uvEnabled = true;
-        s.uvTilesX = 2;
-        s.uvTilesY = 1;
-        s.uvCycles = 1.0;
-        s.uvStartFrameMode = 3;
-        s.uvStartFrameScalar = 0.5;
-        s.uvStartFrameMinScalar = 0.0;
-        s.uvStartFrame = 0.5;
-        s.uvFrameOverTimeMode = 3;
-        s.uvFrameOverTimeScalar = 0.5;
-        s.uvFrameOverTimeMinScalar = 0.0;
-        s.uvFrameOverTime = 0.5;
-    }
-
-    // ===== Ring(4) (PS17)：拖动时按距离连发的小圆环 =====
-    {
-        Subsystem &s = m.ring4;
-        // PSR_21 与 PSR_20 共用材质槽 FileID=4，即同一个 FX_MAT_Touch_Tri 2。
-        s.hdrColor = Rgb{5.992157, 5.992157, 5.992157};
-        // PS17 InitialModule.startColor 与 PS18 同值（同一个材质槽、同一套外观）。
-        s.startColor = Rgb{0.5377358, 0.5377358, 0.5377358};
-        s.textureAsset = "FX_TEX_Triangle_02_1.png";
-        s.textureClamp = true;
-        s.lifetimeSec = 0.2;
-        // PS17 InitialModule.startLifetime (mode=3, random between 0.2 and 0.4)
-        s.startLifetimeMode = 3;
-        s.startLifetimeScalar = 0.20000000298023224;
-        s.startLifetimeMinScalar = 0.4000000059604645;
-        s.size = 0.2;
-        // Transform_8.m_LocalScale.x
-        s.localScale = 0.3078823983669281;
-        // PS17 InitialModule.startSpeed (mode=3, random between 0.2 and 0.3)
-        s.startSpeedMode = 3;
-        s.startSpeedScalar = 0.20000000298023224;
-        s.startSpeedMinScalar = 0.30000001192092896;
-        // PS17 InitialModule.startSize (mode=3, random between 0.1 and 0.2)
-        s.startSizeMode = 3;
-        s.startSizeScalar = 0.20000000298023224;
-        s.startSizeMinScalar = 0.10000000149011612;
-        s.speed = 0.2;
-        s.rateOverDistance = 5.0;
-        s.shapeScale = 0.15000000596046448;
-        // JSON (PS17) burst count is 0; this system is driven by rateOverDistance.
-        s.clickBurst = 0;
-        // 每次距离触发对应一次发射事件（基础发射数为 1）。
-        s.distanceBurst = 1;
-        // PS17 InitialModule.maxNumParticles = 50：单次按下最多同时在场 50 片。
-        // 与 ba-click-fx/docs/unity-reference-baseline.md 的「拖尾碎片每次按下
-        // 实例最多 50」是同一条合同。执行点在 BaClickFxEffect::updateDrag。
-        s.maxParticles = 50;
-        s.sizeCurve = ScalarCurve(kRing4Size);
-        s.colorStops = ColorCurve(kRing4Color);
-        s.alphaStops = ScalarCurve(kRing4Alpha);
-        s.shapeEnabled = true;
-        s.uvEnabled = true;
-        s.uvTilesX = 2;
-        s.uvTilesY = 1;
-        s.uvCycles = 1.0;
-        s.uvStartFrameMode = 3;
-        s.uvStartFrameScalar = 0.5;
-        s.uvStartFrameMinScalar = 0.0;
-        s.uvStartFrame = 0.5;
-        s.uvFrameOverTimeMode = 3;
-        s.uvFrameOverTimeScalar = 0.5;
-        s.uvFrameOverTimeMinScalar = 0.0;
-        s.uvFrameOverTime = 0.5;
-    }
-
-    // ===== MeshTri (PS16)：点击迸发的 2 个旋转三角 =====
-    {
-        Subsystem &s = m.meshTri;
-        // PSR_22 → FX_MAT_Touch_Tri3，shader FX_SHADER_Dissolve_GachaGauge_P。
-        // ShaderGraph 的 HDR 颜色属性 Color_D20A2F66 = 5.992157。
-        s.hdrColor = Rgb{5.992157, 5.992157, 5.992157};
-        s.textureAsset = "FX_TEX_Grad_Ring3.png";
-        s.textureClamp = true;
-        s.lifetimeSec = 0.6;
-        s.size = 0.12;
-        s.localScale = 1.0;
-        s.startSpeedMode = 0;
-        s.startSpeedScalar = 0.0;
-        s.startSpeedMinScalar = 0.0;
-        // PS16 InitialModule.startSize (mode=3, random between 0.12 and 0.14)
-        s.startSizeMode = 3;
-        s.startSizeScalar = 0.11999999731779099;
-        s.startSizeMinScalar = 0.14000000059604645;
-        // PS16 InitialModule.startRotation (mode=3, random between 0 and 2PI)
-        s.startRotationMode = 3;
-        s.startRotationScalar = 6.283185005187988;
-        s.startRotationMinScalar = 0.0;
-        s.speed = 0.0;
-        s.rateOverDistance = 0.0;
-        s.clickBurst = 2;
-        s.rotationEnabled = true;
-        s.rotationScalar = 11.170106887817383;
-        s.rotationCurveMin = ScalarCurve(kMeshTriRotationMin);
-        s.rotationCurveMax = ScalarCurve(kMeshTriRotationMax);
-        // PS16 CustomDataModule.vector0_0.maxCurve: 1 -> 0 -> 1.
-        s.customData0Curve = ScalarCurve(kMeshTriCustomData0);
-        s.sizeCurve = ScalarCurve(kMeshTriSize);
-        s.colorStops = ColorCurve(kMeshTriColor);
-        s.alphaStops = ScalarCurve(kMeshTriAlpha);
-        s.shapeEnabled = false;
-        s.uvEnabled = false;
-    }
-
-    // ===== Trail (TrailRenderer_13)：拖动时的 ribbon 拖尾 =====
-    {
-        Subsystem &s = m.trail;
-        // TrailRenderer_13.m_Time
-        s.lifetimeSec = 0.30000001192092896;
-        // TrailRenderer_13.m_Parameters.widthMultiplier
-        s.widthMultiplier = 0.004999999888241291;
-        // TrailRenderer_13.m_Parameters.widthCurve
-        s.widthCurve = ScalarCurve(kTrailWidth);
-        // TrailRenderer_13.m_MinVertexDistance
-        s.minVertexDistance = 0.009999999776482582;
-        // TrailRenderer_13.m_Parameters.numCornerVertices / numCapVertices
-        s.numCornerVertices = 4;
-        s.numCapVertices = 1;
-        // TrailRenderer_13.textureMode / textureScale
-        s.textureMode = 0;
-        // 序列化数据未保存 textureScale，因此使用 Unity 默认值 1。
-        s.textureScale = 1.0;
-        // FxTrailTimeScale.killUnderTimeScale
-        s.killUnderTimeScale = 0.19;
-        // FX_MAT_TouchFXTrail.mat _Color (HDR)
-        s.hdrColor = Rgb{23.968628, 23.968628, 23.968628};
-        // _Texture = FX_TEX_Trail_03.png（Stretch + Clamp 语义近似）
-        s.textureAsset = "FX_TEX_Trail_03.png";
-        s.textureClamp = true;
-        // TrailRenderer_13.m_Parameters.colorGradient
-        s.gradientMode = 0;
-        s.colorKeys = ColorCurve(kTrailColorKeys);
-        s.alphaKeys = ScalarCurve(kTrailAlphaKeys);
-    }
+    configureTouchSubsystems(m);
 
     // Unity 固定 UI Pass 的正交相机 orthographicSize = 1.0，垂直视锥范围为
     // 2 * kUnityOrthographicSize 个世界单位。因此世界到屏幕的投影比例为：
@@ -271,66 +85,28 @@ SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outp
     const double height = outputHeightPx > 0.0 ? outputHeightPx : kReferenceHeightPx;
     const double worldUnitPx = height / (2.0 * kUnityOrthographicSize) * globalScale;
 
-    for (Subsystem *s : {&m.ring, &m.ring3, &m.ring4, &m.meshTri, &m.trail})
-        finalize(*s, timeScale, globalScale, worldUnitPx);
+    for (Subsystem *s : {&m.ring, &m.ring3, &m.ring4, &m.meshTri, &m.trail}) {
+        finalize(*s, timeScale, worldUnitPx);
+        s->billboardContextScale = float(s->localScale) * float(globalScale);
+        s->cameraWorldUnitPx = float(height * .5);
+        s->cameraHorizontalSpan = float((outputWidthPx > 0 ? outputWidthPx : 1920) / (height * .5));
+    }
 
     return m;
+}
+
+double billboardHalfSize(const Subsystem &params, float startSize, float curve, float percentAge)
+{
+    const auto limits = unity::particleBillboardLimits(params.minParticleSize, params.maxParticleSize,
+        params.billboardContextScale, params.cameraHorizontalSpan, 20.f, true);
+    volatile float size = startSize * std::max(0.f, curve);
+    const auto half = unity::particleBillboardHalfExtents(size, size, limits[2], limits[3], percentAge);
+    return double(half[0]) * params.billboardContextScale * params.cameraWorldUnitPx;
 }
 
 double subProgress(double lifetimeMs, double tMs)
 {
     return clamp(tMs / lifetimeMs, 0, 1);
-}
-
-double sampleMinMaxConstant(int mode, double scalar, double minScalar, Rng &rng)
-{
-    if (mode == 3) {
-        const double lo = std::min(minScalar, scalar);
-        const double hi = std::max(minScalar, scalar);
-        return rng.range(lo, hi);
-    }
-
-    return scalar;
-}
-
-double sampleStartLifetimeSec(const Subsystem &p, Rng &rng)
-{
-    const double sampled = sampleMinMaxConstant(
-        p.startLifetimeMode, p.startLifetimeScalar, p.startLifetimeMinScalar, rng);
-    return std::max(0.0001, sampled);
-}
-
-double sampleStartSizeMul(const Subsystem &p, Rng &rng)
-{
-    const double sampled = sampleMinMaxConstant(
-        p.startSizeMode, p.startSizeScalar, p.startSizeMinScalar, rng);
-    return sampled / std::max(1e-6, p.size);
-}
-
-double sampleStartRotation(const Subsystem &p, Rng &rng)
-{
-    return sampleMinMaxConstant(
-        p.startRotationMode, p.startRotationScalar, p.startRotationMinScalar, rng);
-}
-
-double sampleStartSpeedPx(const Subsystem &p, Rng &rng)
-{
-    return sampleMinMaxConstant(
-        p.startSpeedMode, p.startSpeedScalar, p.startSpeedMinScalar, rng);
-}
-
-double sampleUvStartFrameNorm(const Subsystem &p, Rng &rng)
-{
-    const double sampled = sampleMinMaxConstant(
-        p.uvStartFrameMode, p.uvStartFrameScalar, p.uvStartFrameMinScalar, rng);
-    return clamp(sampled, 0, 1);
-}
-
-double sampleUvFrameOverTimeNorm(const Subsystem &p, Rng &rng)
-{
-    const double sampled = sampleMinMaxConstant(
-        p.uvFrameOverTimeMode, p.uvFrameOverTimeScalar, p.uvFrameOverTimeMinScalar, rng);
-    return std::max(0.0, sampled);
 }
 
 UvTile uvFrameTile(const Subsystem &p, double startFrameNorm, double frameOverTimeValue)
@@ -363,29 +139,20 @@ UvTile uvFrameTile(const Subsystem &p, double startFrameNorm, double frameOverTi
 
 double subSizeCurve(const Subsystem &p, double progress)
 {
-    return evalScalarStops(p.sizeCurve, progress, 1.0);
+    return unity::evaluateParticleCurve(std::span(p.sizeCurve.data, p.sizeCurve.size), float(progress), float(p.sizeCurveMultiplier));
 }
 
 Rgba subColor(const Subsystem &p, double progress, double fallbackAlpha)
 {
-    // 空颜色曲线回退到纯黑，使缺失参数表现为明确的无颜色输出。
-    const Rgb rgb = evalColorStops(p.colorStops, progress, Rgb{0.0, 0.0, 0.0});
-    const double alpha = evalScalarStops(p.alphaStops, progress, fallbackAlpha);
-
-    // Unity 工程是 Linear 颜色空间：Gradient / Color 字段存的是 sRGB 编码值，
-    // 运行时先解码到线性再进混合。curvedata.h 里的关键帧是从序列化资源原样抄来的，
-    // 所以也是 sRGB 编码的，必须在这里解码——否则等于整体做了一次 gamma 提亮。
-    // 插值仍在 sRGB 域完成（与 Unity 的 Gradient.Evaluate 一致），解码放在插值之后。
-    //
-    // startColor 同理：Renderer 勾了 Apply Active Color Space，它是**线性空间的
-    // 乘子**，不是显示空间的。0.5377358 解码后 ≈ 0.2506。
-    const Rgb sc{srgbToLinearChannel(p.startColor[0]),
-                 srgbToLinearChannel(p.startColor[1]),
-                 srgbToLinearChannel(p.startColor[2])};
-    return Rgba{srgbToLinearChannel(rgb[0]) * sc[0],
-                srgbToLinearChannel(rgb[1]) * sc[1],
-                srgbToLinearChannel(rgb[2]) * sc[2],
-                alpha};
+    const std::array<std::uint8_t, 4> start{
+        unity::colorByte(float(p.startColor[0])), unity::colorByte(float(p.startColor[1])),
+        unity::colorByte(float(p.startColor[2])), unity::colorByte(float(fallbackAlpha))};
+    // Unity 先相乘 RGBA8，随后 Apply Active Color Space 解码最终 RGB。
+    // 不能分别解码两个输入再乘，也不能省略缓存插值的整数舍入。
+    const auto color = p.particleGradient ? unity::lifetimeColor(start, *p.particleGradient,
+        std::min(float(clamp(progress, 0.0, 1.0)), std::nextafter(1.f, 0.f))) : start;
+    return {srgbToLinearChannel(color[0] / 255.0), srgbToLinearChannel(color[1] / 255.0),
+        srgbToLinearChannel(color[2] / 255.0), color[3] / 255.0};
 }
 
 } // namespace baclickfx

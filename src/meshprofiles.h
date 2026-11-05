@@ -62,4 +62,7 @@ std::optional<CylinderProfile> loadCylinderObjProfile(const std::string &path);
 /// 加载渲染器所需的全部网格资源。
 MeshProfiles loadMeshProfiles(const std::string &cylinderPath);
 
+/// Unity→OBJ 导出反转了 X；恢复源坐标后，将 Y 向上转换为屏幕 Y 向下。
+Vertex unityObjPointOffset(const Vertex &point, double scale, double cosRotation, double sinRotation);
+
 } // namespace baclickfx

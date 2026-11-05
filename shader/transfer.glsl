@@ -7,6 +7,8 @@
 uniform int u_tfType;
 uniform vec3 u_tfLum;    // 最小亮度、最大亮度和参考白亮度，单位为尼特。
 uniform vec2 u_tfBt1886; // BT.1886 的 a 和 b。
+// 导入时为输出色域 → 线性 BT.709，合成时为逆向。矩阵不包含亮度归一化。
+uniform mat4 u_colorMatrix;
 
 float tfEotf(float e)
 {

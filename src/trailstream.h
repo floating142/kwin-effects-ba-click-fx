@@ -7,12 +7,15 @@
 #pragma once
 
 #include "clickinstance.h"
+#include "unity/trailpoints.h"
+#include "unity/lineribbon.h"
 #include "subsystems.h"
 
 #include <QPointF>
 #include <QRectF>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <vector>
 
 namespace KWin
@@ -22,7 +25,7 @@ namespace KWin
 struct TrailPoint
 {
     QPointF pos;       // 全局逻辑坐标。
-    double age = 0.0;  // 由帧时钟推进的年龄，单位为秒。
+    float birthTime = 0.0f; // 原生 TrailRenderer 使用 float32 出生时刻。
     bool penUp = false;
 };
 
@@ -35,15 +38,20 @@ public:
 
     /// 追加从 `from` 到 `to` 的轨迹段。
     void addSegment(const QPointF &from, const QPointF &to);
+    void setHead(const QPointF &point) { m_head = point; }
+    std::optional<QPointF> head() const { return m_head; }
+    float time() const { return float(m_time); }
+    float lifetime() const { return m_lifetime; }
 
-    /// 推进轨迹年龄并移除超过 `lifeSec` 的点；有点被移除时返回 `true`。
-    bool advance(double dt, double lifeSec);
+    /// 新点使用当前帧时刻，添加后再按寿命回收旧点。
+    void advanceTime(double dt) { m_time += dt; }
+    bool retireExpired(double lifeSec);
 
     /// 返回全部轨迹点向外扩展 `padPx` 后的包围盒。
     QRectF boundingBox(double padPx) const;
 
     bool empty() const { return m_points.empty(); }
-    void clear() { m_points.clear(); }
+    void clear() { m_points.clear(); m_head.reset(); m_time = 0; }
     const std::deque<TrailPoint> &points() const { return m_points; }
 
 private:
@@ -51,13 +59,16 @@ private:
     void pushPoint(const QPointF &p, bool penUp);
 
     std::deque<TrailPoint> m_points;
+    std::optional<QPointF> m_head;
+    double m_time = 0;
+    float m_lifetime = .30000001192092896f;
 };
 
 /// 单条笔划中的全局逻辑坐标渲染采样点。
 struct StrokeSample
 {
     QPointF pos;
-    double headT = 0.0;    // 0 表示尾部，1 表示头部。
+    double headT = 0.0;    // 0 表示头部，1 表示尾部。
     double width = 0.0;    // 最终逻辑像素宽度。
     double textureU = 0.0; // TrailRenderer 纹理模式计算出的 U 坐标。
     baclickfx::Rgb color{}; // 线性 RGB，输出阶段只追加 HDR 倍率。
@@ -68,9 +79,15 @@ struct StrokeData
 {
     std::vector<StrokeSample> samples;
     std::vector<double> segmentLengths;
-    std::vector<QPointF> directions;
-    std::vector<QPointF> normals;
     double totalLength = 0.0;
+    QPointF ribbonOrigin;
+    std::vector<baclickfx::unity::LinePoint> ribbonInput;
+    baclickfx::unity::LineRibbonScratch ribbonScratch;
+    std::vector<baclickfx::unity::LineRibbonVertex> ribbon;
+    // 按原生头尾顺序准备点；跨帧复用容量，避免每帧分配临时数组。
+    std::vector<baclickfx::unity::TrailPointRecord> sourcePoints;
+    std::vector<std::array<float, 3>> preparedPoints;
+    std::vector<float> emissionFlags;
 };
 
 /**
@@ -102,7 +119,6 @@ struct TriBurstInstance
     double age = 0.0;
     double life = 0.0;
     double halfSize = 0.0;
-    bool drawn = false;
     // Ring4 的 maxNumParticles 作用于单次按下，因此用流水号关联所属拖动会话。
     std::uint64_t dragSerial = 0;
     TriBurstEmission burst;
@@ -115,7 +131,7 @@ struct TriBurstInstance
  */
 TriBurstInstance makeTriBurstInstance(const QPointF &pos, const baclickfx::Subsystem &ring4,
                                       int emitEvents, double timeScale, int countCap,
-                                      baclickfx::Rng &rng);
+                                      baclickfx::Rng &rng, ParticleEmitterState *state = nullptr);
 
 /**
  * 将 Unity `rateOverDistance` 换算为逻辑像素发射间距。

@@ -2,6 +2,7 @@
 // BA Click FX 的 KWin 特效实现。
 
 #pragma once
+#include <QSizeF>
 
 #include "applicationfilter.h"
 #include "baclickfxdefaults.h"
@@ -9,6 +10,7 @@
 #include "curveutils.h"
 #include "gpurenderer.h"
 #include "kwincompat.h"
+#include "frameclock.h"
 #include "meshprofiles.h"
 #include "subsystems.h"
 #include "trailstream.h"
@@ -64,7 +66,7 @@ private:
     void paintOverlay(const RenderTarget &renderTarget, const RenderViewport &viewport,
                        const Region &deviceRegion) override;
 
-    /// 保留高回报率设备的帧内路径；旧后端沿用已有采样回退。
+    /// 原生移动事件立即更新过滤状态；轨迹在呈现帧中采样。
     void handlePointerMotion(const QPointF &position) override;
 
     /// 读取 `[Effect-ba-click-fx]` 配置并重建运行时参数。
@@ -77,6 +79,7 @@ private:
 
     /// 推进实例状态并移除寿命结束的对象。
     void advance(double dt);
+    void retireTrails();
 
     /**
      * 渲染当前输出上的全部活动内容。
@@ -102,10 +105,10 @@ private:
     void spawn(const QPointF &pos);
 
     /// 开始新的拖动会话并初始化距离累计状态。
-    void startDrag(const QPointF &pos);
+    void startDrag(const QPointF &pos, bool awaitFirstSample = false);
 
     /// 根据累计路径距离追加拖尾采样并触发 Ring4 发射。
-    void updateDrag(const QPointF &pos);
+    void updateDrag(const QPointF &pos, double elapsed);
 
     /// 结束拖动会话；已有拖尾点继续按寿命老化。
     void endDrag();
@@ -118,7 +121,7 @@ private:
      *
      * 坐标未命中输出时依次回退到首个输出和 1080 像素参考高度。
      */
-    double outputHeightForPos(const QPointF &pos) const;
+    QSizeF outputSizeForPos(const QPointF &pos) const;
 
     // 当前参数表对应的输出；仅在创建新实例或拖尾会话时刷新。
     void refreshSubsystems(const QPointF &pos);
@@ -170,6 +173,11 @@ private:
     baclickfx::MeshProfiles m_meshes;
     baclickfx::Rng m_rng;
 
+    struct PendingClick {
+        QPointF position;
+        std::uint64_t firstSampleSerial = 0;
+    };
+    std::vector<PendingClick> m_pendingClicks;
     std::vector<ClickInstance> m_instances;
     std::vector<TriBurstInstance> m_bursts;
     struct TrailSession {
@@ -177,8 +185,10 @@ private:
         double timeScale = 1.0;
         baclickfx::Subsystem trailParams;
         baclickfx::Subsystem ring4Params;
+        ParticleEmitterState emitter;
         std::vector<StrokeData> strokes;
         bool active = false;
+        bool firstSamplePending = false;
     };
     std::vector<TrailSession> m_trails;
 
@@ -190,18 +200,11 @@ private:
     // 拖动采样状态
     // 上一次采样到的指针位置。
     QPointF m_lastDrag;
-    // 上一个拖尾落点；未起笔时由 m_trailEmitValid 标记无效。
-    QPointF m_trailEmit;
-    bool m_trailEmitValid = false;
-    // 尚未达到 minVertexDistance 的跨帧累计距离。
-    double m_trailAccum = 0.0;
-    // 尚未达到 Ring4 发射间距的跨帧累计距离。
-    double m_distAccum = 0.0;
 
     // 帧时钟；0 表示第一帧仅建立时间基准。
-    std::chrono::nanoseconds m_lastFrame{0};
+    baclickfx::OutputFrameClock m_frameClock;
 
-    // 收到 pointerMotion 或 mouseChanged 移动通知后停止帧级 cursorPos() 回退采样。
+    // 用于输入诊断：是否收到原生移动通知；几何始终逐呈现帧采样。
     bool m_motionEventsWork = false;
 
     // 以下区域均使用全局逻辑坐标。缓存结果可确保预绘制、背景导入、Bloom 和最终
@@ -209,11 +212,13 @@ private:
     Region m_lastDirty;
     // 未做 Bloom 外扩的内容区域。
     Region m_lastContent;
+    Region m_lastBloomSource;
 
     // contentRegion() 为当前模拟快照计算的保守包围盒；逐输出渲染只做相交判断，
     // 避免多输出重复求值曲线、三角函数和 MeshTri 顶点。
     std::vector<QRectF> m_clickBaseBounds;
     std::vector<QRectF> m_clickMeshBounds;
+    std::vector<QRectF> m_clickTriBounds;
     std::vector<QRectF> m_burstBounds;
     std::vector<QRectF> m_trailBounds;
 
@@ -295,7 +300,7 @@ private:
     double m_statFrameMsMax = 0.0;
     double m_statDevicePxSum = 0.0;   // KWin 实际重画的设备像素数
     double m_statRequestPxSum = 0.0;  // 我们申请的（m_lastDirty 折算设备像素）
-    double m_statBloomSourcePxSum = 0.0; // Bloom 原始输入（m_lastContent）设备像素数
+    double m_statBloomSourcePxSum = 0.0; // Bloom 原始输入（m_lastBloomSource）设备像素数
     double m_statDeviceRectsSum = 0.0;
     double m_statRequestRectsSum = 0.0;
     double m_statBloomSourceRectsSum = 0.0;

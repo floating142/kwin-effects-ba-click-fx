@@ -9,10 +9,10 @@
  * - additive.frag：Ring3/Ring4 三角形（FX_SHADER_Additive_0）。
  *
  * 帧处理流程与 Unity UIRenderPass 保持一致：
- * 1. 将屏幕缓冲导入线性 RGBA16F 场景纹理；
- * 2. 按原始混合状态在场景纹理上绘制粒子；
+ * 1. 将屏幕缓冲转换到线性 BT.709 RGBA16F 场景纹理；
+ * 2. 按原始混合状态在场景纹理上绘制 UIAlwaysVisible 粒子和拖尾；
  * 3. 执行 PPv2 MXFinalBloom 金字塔；
- * 4. 计算 `main + bloom * intensity * color`，再按输出传递函数编码。
+ * 4. 将 LetterBox 小三角加到线性场景，再计算 `main + bloom * intensity * color`，再转换到输出色域并按其传递函数编码。
  *
  * 场景纹理必须包含真实桌面颜色，因为 Ring 的 `One OneMinusSrcAlpha` 和 Dissolve
  * 的 `SrcAlpha One` 都依赖目标颜色。
@@ -73,7 +73,7 @@ public:
      * 资源按输出逻辑矩形和缩放缓存。OpenGL 上下文无效或资源分配失败时返回
      * `false`。
      */
-    bool prepareTargets(const RenderViewport &viewport);
+    bool prepareTargets(const RenderTarget &renderTarget, const RenderViewport &viewport);
 
     /**
      * 导入桌面背景并开始渲染当前输出的 HDR 帧。
@@ -90,10 +90,12 @@ public:
     bool beginFrame(const RenderTarget &renderTarget, const RenderViewport &viewport,
                     const Region &importRegion);
 
-    /// 绘制材质队列 3000 中的 Ring 和 Ring3。
+    /// 绘制材质队列 4499 中的 Ring。
     void renderClickBase(const ClickInstance &inst, const QPointF &outputOrigin);
+    /// 绘制材质队列 4550 中的 Ring3。
+    void renderClickAdditive(const ClickInstance &inst, const QPointF &outputOrigin);
 
-    /// 在队列 3000 图层之后绘制材质队列 4499 的 MeshTri。
+    /// 绘制材质队列 4499 的 MeshTri。
     void renderClickMeshTri(const ClickInstance &inst,
                             const baclickfx::CylinderProfile &mesh, const QPointF &outputOrigin);
 
@@ -108,19 +110,13 @@ public:
                      const baclickfx::Subsystem &params,
                      const QPointF &outputOrigin);
 
-    /**
-     * 执行辉光处理，并将线性 HDR 场景纹理编码回 KWin 输出。
-     *
-     * @param compositeRegion 最终覆盖写入的全局逻辑区域。
-     * @param bloomSourceRegion 本帧粒子写入的原始区域，不包含辉光外扩。
-     *
-     * `compositeRegion` 必须与 `prePaintScreen()` 申请的区域一致，并被
-     * `beginFrame()` 的导入区域包含。辉光从 `bloomSourceRegion` 按各级采样核传播；
-     * 最终合成使用已外扩的 `compositeRegion`。FBO 和金字塔保持输出级完整尺寸，
-     * `Region` 仅用于跳过确定不变的纹理像素。
-     */
+    /// 更新辉光金字塔，保持场景 FBO 绑定，以便继续绘制原版的 LetterBox 图层。
+    /// bloomSourceRegion 是辉光之前绘制的图层范围，使用全局逻辑坐标。
+    bool updateBloom(const RenderTarget &renderTarget, const Region &bloomSourceRegion);
+
+    /// 叠加已算好的辉光并编码输出。compositeRegion 必须包含在 beginFrame 的导入范围内。
     void endFrame(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                  const Region &compositeRegion, const Region &bloomSourceRegion);
+                  const Region &compositeRegion, bool bloomOk);
 
     /// 启用或禁用背景导入、粒子、辉光和最终合成四个阶段的异步 GPU 计时。
     void setProfiling(bool on);
@@ -177,7 +173,7 @@ private:
     std::unique_ptr<GLTexture> loadTexture(const char *assetName, GLenum wrapMode);
 
     /// 将输出传递函数参数写入已绑定的背景导入或合成着色器。
-    static void setTransferFunctionUniforms(GLShader *shader, const RenderTarget &renderTarget);
+    static void setColorSpaceUniforms(GLShader *shader, const RenderTarget &renderTarget, bool toWorkingSpace);
 
     /// 将顶点追加到当前 CPU 批次。
     void appendVertex(const ParticleVertex &vertex);
@@ -195,15 +191,15 @@ private:
     // 几何生成。
 
     /// 生成 Ring 圆盘几何并追加到当前批次。
-    void renderRing(double cx, double cy, const RingEmission &sub, double ageSec);
+    void renderRing(double cx, double cy, const RingEmission &sub);
 
     /// 生成 MeshTri 圆环弧段并追加到当前批次。
-    void renderMeshTri(double cx, double cy, const MeshTriEmission &sub, double ageSec,
+    void renderMeshTri(double cx, double cy, const MeshTriEmission &sub,
                        const baclickfx::CylinderProfile &profile);
 
     /// 生成始终面向屏幕的 Ring3/Ring4 几何，并追加到当前批次。
     void renderTriBurstGeometry(double cx, double cy, const TriBurstEmission &sub,
-                                double ageSec, bool flush);
+                                bool flush);
 
     // 渲染资源。
     // Unity 原始贴图。
@@ -224,7 +220,7 @@ private:
     ShaderSet m_shaderBloomDownsample;
     ShaderSet m_shaderBloomUpsample;
 
-    // 辉光金字塔层级。第 0 级为半分辨率，后续层级依次减半直至 kBloomMinSize。
+    // 辉光金字塔层级。第 0 级为半分辨率，层数由 Unity Diffusion 公式决定。
     // 降采样与上采样使用独立目标，避免上采样时同时读写同一附件形成 OpenGL 反馈环。
     struct BloomLevel {
         std::unique_ptr<GLTexture> downTexture;
@@ -241,6 +237,7 @@ private:
         // 使用 QRectF 以确保边界语义与后续 Qt 几何计算一致。
         QRectF renderRect;  // 全局逻辑矩形和缓存键。
         double scale = 1.0; // 输出缩放和缓存键。
+        QRectF textureRect; // 设备像素网格覆盖的逻辑矩形，包含非整数缩放原点的相位。
         QSize devicePx;     // 私有纹理尺寸，保持输出的逻辑方向。
         QSize renderTargetDevicePx; // 旋转后的目标设备尺寸和缓存键。
         int transformKind = 0;       // OutputTransform::Kind 和缓存键。
@@ -290,17 +287,6 @@ private:
     // 和可选的 CustomData0，因此使用共享 VBO 和每个 ShaderSet 的专用 VAO。
     GLuint m_vbo = 0;
     std::vector<ParticleVertex> m_vertices;
-    struct TrailVertexStyle {
-        double halfWidth = 0.0;
-        float r = 0.0f;
-        float g = 0.0f;
-        float b = 0.0f;
-        float a = 0.0f;
-    };
-    std::vector<QPointF> m_trailLocalSamples;
-    std::vector<TrailVertexStyle> m_trailStyles;
-    std::vector<QPointF> m_trailNormals;
-    std::vector<QPointF> m_trailDirs;
     std::vector<ParticleVertex> m_trailStrip;
     std::vector<ParticleVertex> m_regionQuads;
 
@@ -314,6 +300,8 @@ private:
     GLint m_savedBlendDstRgb = GL_ZERO;
     GLint m_savedBlendSrcAlpha = GL_ONE;
     GLint m_savedBlendDstAlpha = GL_ZERO;
+    GLint m_savedBlendEquationRgb = GL_FUNC_ADD;
+    GLint m_savedBlendEquationAlpha = GL_FUNC_ADD;
     GLint m_savedViewport[4] = {0, 0, 0, 0};
     GLboolean m_savedScissorEnabled = GL_FALSE;
     GLint m_savedScissorBox[4] = {0, 0, 0, 0};

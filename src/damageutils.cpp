@@ -8,6 +8,11 @@
 namespace baclickfx
 {
 
+QPoint logicalPixelAt(const QPointF &position)
+{
+    return QPoint(int(std::floor(position.x())), int(std::floor(position.y())));
+}
+
 QRect quantizeDamageRect(const QRectF &bounds, int tilePx)
 {
     if (bounds.isNull() || bounds.isEmpty() || tilePx <= 0) {

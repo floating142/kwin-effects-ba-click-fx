@@ -5,6 +5,12 @@
 
 #include "meshprofiles.h"
 #include "subsystems.h"
+#include "unity/initial.h"
+#include "unity/emission.h"
+#include "unity/circle.h"
+#include "unity/uv.h"
+#include "unity/motion.h"
+#include "unity/retirement.h"
 
 #include <QPointF>
 
@@ -16,7 +22,8 @@ namespace KWin
 // 发射数据
 //
 // `lifetimeSec` 表示 Unity 模拟域寿命，用于计算位移；`durationSec` 表示经过
-// `timeScale` 换算后的墙钟时长，用于计算动画进度。`lifetimeMs` 仅用于兼容和诊断。
+// `timeScale` 换算后的参考墙钟时长。实际进度和退役采用原生 percentAge。
+// `lifetimeMs` 仅用于兼容和诊断。
 
 /// Ring 圆盘的发射参数。
 struct RingEmission
@@ -26,23 +33,50 @@ struct RingEmission
     double durationSec = 0.0;
     int lifetimeMs = 16;
     double startRotationRad = 0.0;
+    float startSize = 0;
+    float percentAge = 0;
+    float inverseLifetime = 0;
 };
 
 /// Ring3 与 Ring4 共用的单个三角粒子参数。
 struct TriParticle
 {
-    double angle = 0.0; // 出生位置角度和径向速度方向。
+    baclickfx::unity::Motion worldMotion;
+    float percentAge = 0;
+    float inverseLifetime = 0;
+    std::uint32_t seed = 0;
     // PS17/PS18 的初始旋转恒为 0；三角朝向由图集帧决定。
     double orientBase = 0.0;
     double spin = 0.0; // PS17/PS18 的 RotationModule 已禁用。
     double lifetimeSec = 0.0;
     double durationSec = 0.0;
     int lifetimeMs = 16;
-    double speedPxPerSec = 0.0;
-    double sizeMul = 1.0;
+    float startSize = 0;
     double uvStartFrameNorm = 0.0;
     double uvFrameOverTimeNorm = 0.0;
 };
+
+/// 每个 ParticleSystem 独立的 Initial / Shape 四 lane 随机流。
+struct ParticleEmitterState
+{
+    explicit ParticleEmitterState(std::uint32_t seed = 0) : initial(seed), shape(seed) { emission.init(seed); }
+    baclickfx::unity::Initial initial;
+    baclickfx::unity::CircleShape shape;
+    baclickfx::unity::EmissionState emission;
+    void beginEmission(std::uint64_t count) { initial.discardBatch(); shape.beginEmission(count); }
+};
+
+struct ParticleBirthFrame
+{
+    baclickfx::unity::EmissionState emission;
+    std::uint64_t rateCount = 0;
+    float step = 0, offset = 0, simulationSpeed = 1;
+    baclickfx::unity::MotionVector emitterVelocity{};
+};
+void applyTriParticleBirth(TriParticle &particle, std::uint64_t lane, const ParticleBirthFrame &frame);
+
+/// World 模拟空间：出生位置与速度已由原生出生管线变换，投影时不重复乘局部缩放。
+QPointF triParticleOffset(const TriParticle &particle, const baclickfx::Subsystem &params);
 
 struct TriBurstEmission
 {
@@ -51,16 +85,20 @@ struct TriBurstEmission
     double durationSec = 0.0;
     int lifetimeMs = 16;
     std::vector<TriParticle> particles;
+    double timeScale = 1;
+    float simulationRemainder = 0;
 };
+
+void appendTriBurst(TriBurstEmission &burst, const baclickfx::Subsystem &params,
+    double timeScale, int accepted, baclickfx::Rng &rng, ParticleEmitterState &state,
+    const ParticleBirthFrame &frame, const baclickfx::unity::MotionVector &originOffset = {});
 
 /// MeshTri 的单个圆环弧段参数。
 struct MeshTriArc
 {
     double angle = 0.0;
-    double rotMix = 0.0; // rotationCurveMin 与 rotationCurveMax 的混合因子。
+    std::uint32_t seed = 0;
     double radiusMul = 1.0;
-    double widthMul = 1.0;
-    double phase = 0.0;
 };
 
 struct MeshTriEmission
@@ -69,6 +107,8 @@ struct MeshTriEmission
     double lifetimeSec = 0.0;
     double durationSec = 0.0;
     int lifetimeMs = 16;
+    float percentAge = 0;
+    float inverseLifetime = 0;
     std::vector<MeshTriArc> arcs;
 };
 
@@ -81,8 +121,10 @@ struct ClickInstance
     double age = 0.0;      // 由帧时钟推进的墙钟时间，单位为秒。
     double life = 0.0;     // 精确墙钟寿命，单位为秒。
     double halfSize = 0.0; // 保守包围盒半边长。
-    // 首帧以 age=0 绘制，之后再按呈现间隔推进。
-    bool drawn = false;
+    // 首次呈现时按源出生分数推进，而不是额外停留一帧。
+    bool birthPending = true;
+    double timeScale = 1;
+    float simulationRemainder = 0;
 
     RingEmission ring;
     TriBurstEmission ring3;
@@ -110,22 +152,23 @@ ClickInstance makeClickInstance(const QPointF &pos, const baclickfx::SubsystemMa
  * @param rng 随机数源。
  */
 TriBurstEmission emitTriBurst(const baclickfx::Subsystem &params, double timeScale,
-                              int countOverride, baclickfx::Rng &rng);
+                              int countOverride, baclickfx::Rng &rng,
+                              ParticleEmitterState *state = nullptr);
 
 // 求值辅助函数
 //
 // 模拟、damage 计算与 GPU 渲染共享这些纯函数，确保使用同一套公式。
 
-/// 计算图层归一化进度；`durationSec <= 0` 时返回 1。
-double layerProgress(double durationSec, double ageSec);
+/// 用原生百分比年龄采样曲线；存活与回收仍以原始百分比判定。
+float particleProgress(float percentAge);
+bool clickInstanceAlive(const ClickInstance &instance);
+void initializeClickBirth(ClickInstance &instance, double wallDeltaSec);
+void advanceClickFrame(ClickInstance &instance, double wallDeltaSec);
+void advanceClickInstance(ClickInstance &instance, double wallDeltaSec);
+void advanceTriBurstFrame(TriBurstEmission &burst, double wallDeltaSec);
 
-/**
- * 计算 MeshTri 弧段的累计旋转角。
- *
- * Rotation over Lifetime 表示角速度曲线；实现对分段 Hermite 曲线做解析积分，并
- * 在结果上应用屏幕坐标系方向修正。
- */
-double meshTriRotation(const MeshTriEmission &sub, double p, double mix);
+/// 按 Unity World 模式逐帧求角速度并推进角度及百分比年龄。
+void advanceMeshTri(MeshTriEmission &sub, double simulationDeltaSec);
 
 /// 采样驱动 MeshTri 溶解范围的 CustomData0 曲线。
 double meshTriCustom0(const MeshTriEmission &sub, double p);

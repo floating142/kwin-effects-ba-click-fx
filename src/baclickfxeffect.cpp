@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "baclickfxeffect.h"
+#include "unity/timing.h"
 #include "applicationfilter.h"
 #include "baclickfxdefaults.h"
 #include "diagnostics.h"
 #include "damageutils.h"
-#include "pathresampler.h"
 #include "outputscaleutils.h"
 #include "mousebuttonutils.h"
 
@@ -47,23 +47,21 @@ void unitePointBounds(QRectF &bounds, double x, double y)
     bounds = bounds.isNull() ? point : bounds.united(point);
 }
 
-QRectF triBurstBounds(const QPointF &center, const TriBurstEmission &burst, double ageSec)
+QRectF triBurstBounds(const QPointF &center, const TriBurstEmission &burst)
 {
     QRectF bounds;
     for (const TriParticle &item : burst.particles) {
-        const double progress = layerProgress(item.durationSec, ageSec);
+        const double progress = particleProgress(item.percentAge);
         if (progress >= 1.0) {
             continue;
         }
 
         // 与 GPURenderer::renderTriBurstGeometry 使用完全相同的位置和尺寸公式。
-        const double dist = item.speedPxPerSec * item.lifetimeSec * progress;
-        const double radius = burst.params.localScalePx * (burst.params.shapeScale + dist);
-        const double x = center.x() + std::cos(item.angle) * radius;
-        const double y = center.y() + std::sin(item.angle) * radius;
-        const double side = burst.params.sizePx * item.sizeMul
-            * std::max(0.0, baclickfx::subSizeCurve(burst.params, progress));
-        const double half = side * 0.5;
+        const QPointF position = center + triParticleOffset(item, burst.params);
+        const double x = position.x();
+        const double y = position.y();
+        const double half = baclickfx::billboardHalfSize(burst.params, item.startSize,
+            float(baclickfx::subSizeCurve(burst.params, progress)), item.percentAge);
 
         // PS17/PS18 当前没有旋转；仍按渲染器公式保留通用旋转，避免参数以后变化
         // 时 damage 与实际几何脱节。
@@ -84,10 +82,10 @@ QRectF clickBaseBounds(const ClickInstance &inst)
     QRectF bounds;
 
     // Ring：与 renderRing 相同的旋转正方形。
-    const double ringP = layerProgress(inst.ring.durationSec, inst.age);
+    const double ringP = particleProgress(inst.ring.percentAge);
     if (ringP < 1.0) {
-        const double half = inst.ring.params.sizePx
-            * std::max(0.0, baclickfx::subSizeCurve(inst.ring.params, ringP));
+        const double half = baclickfx::billboardHalfSize(inst.ring.params, inst.ring.startSize,
+            float(baclickfx::subSizeCurve(inst.ring.params, ringP)), inst.ring.percentAge);
         const double c = std::cos(inst.ring.startRotationRad);
         const double s = std::sin(inst.ring.startRotationRad);
         for (const auto &[sx, sy] : {std::pair{-half, -half}, std::pair{half, -half},
@@ -95,11 +93,6 @@ QRectF clickBaseBounds(const ClickInstance &inst)
             unitePointBounds(bounds, inst.center.x() + sx * c - sy * s,
                              inst.center.y() + sx * s + sy * c);
         }
-    }
-
-    const QRectF ring3 = triBurstBounds(inst.center, inst.ring3, inst.age);
-    if (!ring3.isNull()) {
-        bounds = bounds.isNull() ? ring3 : bounds.united(ring3);
     }
 
     return bounds;
@@ -111,21 +104,17 @@ QRectF clickMeshBounds(const ClickInstance &inst,
     QRectF bounds;
 
     // MeshTri：逐弧段、逐 OBJ 顶点执行与 renderMeshTri 相同的缩放和旋转。
-    const double meshP = layerProgress(inst.meshTri.durationSec, inst.age);
+    const double meshP = particleProgress(inst.meshTri.percentAge);
     if (meshP < 1.0) {
         for (const MeshTriArc &arc : inst.meshTri.arcs) {
-            const double localP = baclickfx::clamp(meshP + arc.phase * 0.08, 0.0, 1.0);
+            const double localP = meshP;
             const double scale = inst.meshTri.params.sizePx * arc.radiusMul
                 * std::max(0.0, baclickfx::subSizeCurve(inst.meshTri.params, localP));
-            const double rotation = arc.angle
-                + meshTriRotation(inst.meshTri, localP, arc.rotMix);
-            const double c = std::cos(rotation);
-            const double s = std::sin(rotation);
+            const double rotation = arc.angle;
+            const double c = std::cos(rotation), s = std::sin(rotation);
             for (const baclickfx::Vertex &p : profile.mesh.vertices) {
-                const double x = p[0] * scale;
-                const double y = p[1] * scale;
-                unitePointBounds(bounds, inst.center.x() + x * c - y * s,
-                                 inst.center.y() + x * s + y * c);
+                const auto point = baclickfx::unityObjPointOffset(p, scale, c, s);
+                unitePointBounds(bounds, inst.center.x() + point[0], inst.center.y() + point[1]);
             }
         }
     }
@@ -324,10 +313,11 @@ bool BaClickFxEffect::logsVerbose() const
     return m_logLevel >= baclickfx::defaults::LogLevel::Verbose;
 }
 
-double BaClickFxEffect::outputHeightForPos(const QPointF &pos) const
+QSizeF BaClickFxEffect::outputSizeForPos(const QPointF &pos) const
 {
     // Unity 固定 UI Pass 的垂直范围为两个世界单位，因此一个世界单位等于输出逻辑
     // 高度的一半，特效在不同分辨率下保持相同占屏比例。
+    const QPoint pixel = baclickfx::logicalPixelAt(pos);
     const LogicalOutput *first = nullptr;
     for (const LogicalOutput *out : effects->screens()) {
         if (!out) {
@@ -337,22 +327,22 @@ double BaClickFxEffect::outputHeightForPos(const QPointF &pos) const
             first = out;
         }
         const Rect g = out->geometry();
-        const QRectF geo(g.x(), g.y(), g.width(), g.height());
-        if (geo.contains(pos)) {
-            return geo.height();
+        if (g.contains(pixel)) {
+            return QSizeF(g.width(), g.height());
         }
     }
     if (first) {
-        return first->geometry().height();
+        return QSizeF(first->geometry().width(), first->geometry().height());
     }
-    return baclickfx::kReferenceHeightPx;
+    return QSizeF(1920, baclickfx::kReferenceHeightPx);
 }
 
 double BaClickFxEffect::outputScaleForPos(const QPointF &pos) const
 {
     if (!m_outputScaleEnabled) return m_globalScale;
+    const QPoint pixel = baclickfx::logicalPixelAt(pos);
     for (const LogicalOutput *out : effects->screens()) {
-        if (!out || !out->geometry().contains(pos.toPoint())) continue;
+        if (!out || !out->geometry().contains(pixel)) continue;
         const QString fingerprint = baclickfx::outputScaleId(
             out->manufacturer(), out->model(), out->serialNumber(), out->name());
         for (const QString &key : {baclickfx::preferredOutputScaleId(
@@ -373,15 +363,16 @@ double BaClickFxEffect::outputScaleForPos(const QPointF &pos) const
 void BaClickFxEffect::refreshSubsystems(const QPointF &pos)
 {
     // 每次创建实例或拖尾会话都按所在输出重建，避免跨屏后沿用旧高度或逐屏缩放。
-    m_subsystems = baclickfx::buildSubsystemMap(m_timeScale, outputScaleForPos(pos),
-                                                outputHeightForPos(pos));
+    const auto size = outputSizeForPos(pos);
+    m_subsystems = baclickfx::buildSubsystemMap(m_timeScale, outputScaleForPos(pos), size.height(), size.width());
 }
 
 bool BaClickFxEffect::isActive() const
 {
     // 拖动中即使屏上暂时空着也要保持活跃：光标位置是按帧轮询的，
     // 一旦停帧就再也收不到移动，距离发射器和拖尾都会停在原地。
-    return m_dragging || !m_instances.empty() || !m_bursts.empty() || !m_trails.empty();
+    return m_dragging || !m_pendingClicks.empty()
+        || !m_instances.empty() || !m_bursts.empty() || !m_trails.empty();
 }
 
 int BaClickFxEffect::requestedEffectChainPosition() const
@@ -548,30 +539,28 @@ void BaClickFxEffect::spawn(const QPointF &pos)
 void BaClickFxEffect::advance(double dt)
 {
     for (ClickInstance &inst : m_instances) {
-        // 还没上过屏的实例先欠一帧，让它的第一帧落在 age=0，见 ClickInstance::drawn。
-        if (!inst.drawn) {
-            continue;
-        }
-        inst.age += dt;
+        advanceClickFrame(inst, dt);
     }
     std::erase_if(m_instances, [](const ClickInstance &inst) {
-        return inst.age >= inst.life;
+        return !clickInstanceAlive(inst);
     });
 
     for (TriBurstInstance &inst : m_bursts) {
-        if (!inst.drawn) {
-            continue;
-        }
+        advanceTriBurstFrame(inst.burst, dt);
         inst.age += dt;
     }
     std::erase_if(m_bursts, [](const TriBurstInstance &inst) {
-        return inst.age >= inst.life;
+        return inst.burst.particles.empty();
     });
 
+}
+
+void BaClickFxEffect::retireTrails()
+{
     // 每次按下保存独立参数，使跨屏后的新拖动不改变已有拖尾寿命。
     for (TrailSession &session : m_trails) {
-        session.stream.advance(
-            dt, baclickfx::clamp(session.trailParams.lifetimeSec / session.timeScale, 0.001, 60.0));
+        session.stream.retireExpired(
+            baclickfx::clamp(session.trailParams.lifetimeSec / session.timeScale, 0.001, 60.0));
     }
     std::erase_if(m_trails, [](const TrailSession &session) {
         return !session.active && session.stream.empty();
@@ -677,8 +666,9 @@ bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos, InputPhase phase) co
     }
 
     bool onOutput = false;
+    const QPoint pixel = baclickfx::logicalPixelAt(pos);
     for (const LogicalOutput *output : effects->screens()) {
-        if (output && output->geometry().contains(pos.toPoint())) {
+        if (output && output->geometry().contains(pixel)) {
             onOutput = true;
             break;
         }
@@ -700,17 +690,13 @@ bool BaClickFxEffect::isEffectAllowedAt(const QPointF &pos, InputPhase phase) co
     return true;
 }
 
-void BaClickFxEffect::startDrag(const QPointF &pos)
+void BaClickFxEffect::startDrag(const QPointF &pos, bool awaitFirstSample)
 {
     refreshSubsystems(pos);
     m_dragging = true;
     m_motionEventsWork = false;
     m_autoTrailSession = false;
     m_lastDrag = pos;
-    m_trailEmit = pos;
-    m_trailEmitValid = true;
-    m_trailAccum = 0;
-    m_distAccum = 0;
     // 新的一次按下 = 新的一个 FX_Touch 实例，50 片的名额重新起算。
     m_dragSerial++;
 
@@ -718,8 +704,10 @@ void BaClickFxEffect::startDrag(const QPointF &pos)
     session.timeScale = m_timeScale;
     session.trailParams = m_subsystems.trail;
     session.ring4Params = m_subsystems.ring4;
+    session.emitter = ParticleEmitterState(m_rng.nextSeed());
     session.active = true;
-    if (trailEnabled()) {
+    session.firstSamplePending = awaitFirstSample;
+    if (trailEnabled() && !awaitFirstSample) {
         session.stream.beginStroke(pos);
     }
     m_trails.push_back(std::move(session));
@@ -735,7 +723,7 @@ int BaClickFxEffect::liveDistanceParticles(std::uint64_t dragSerial) const
         }
         for (const TriParticle &p : inst.burst.particles) {
             // burst 里所有粒子共用 inst.age，各自寿命不同（startLifetime 是区间随机）。
-            if (inst.age < p.durationSec) {
+            if (baclickfx::unity::survives(p.percentAge)) {
                 live++;
             }
         }
@@ -743,31 +731,45 @@ int BaClickFxEffect::liveDistanceParticles(std::uint64_t dragSerial) const
     return live;
 }
 
-void BaClickFxEffect::updateDrag(const QPointF &pos)
+void BaClickFxEffect::updateDrag(const QPointF &pos, double elapsed)
 {
     if (!m_dragging) {
         return;
     }
-    // 指针回调、mouseChanged 和帧级采样共用此入口，不能让任一路径绕过过滤。
+    // 呈现帧也要检查过滤规则，窗口可能在两次指针事件之间进入全屏。
     const InputPhase phase = m_autoTrailSession ? InputPhase::Trigger : InputPhase::HeldMotion;
     if (m_pressSuppressed || !isEffectAllowedAt(pos, phase)) {
         endDrag();
         return;
     }
 
+    TrailSession *session = !m_trails.empty() && m_trails.back().active
+        ? &m_trails.back()
+        : nullptr;
+    if (session && session->firstSamplePending) {
+        // Unity 在创建特效的 Update 内先定位再播放，首个位置直接作为轨迹起点。
+        refreshSubsystems(pos);
+        session->trailParams = m_subsystems.trail;
+        session->ring4Params = m_subsystems.ring4;
+        session->firstSamplePending = false;
+        m_lastDrag = pos;
+        if (trailEnabled()) {
+            session->stream.beginStroke(pos);
+        }
+    }
+
     // 保留 KWin 的分数逻辑坐标，避免降低短距离轨迹的采样精度。
     const double dx = pos.x() - m_lastDrag.x();
     const double dy = pos.y() - m_lastDrag.y();
     const double dist = std::hypot(dx, dy);
-    if (dist <= 0) {
-        ++m_inputDiscarded;
-        return;
-    }
-    ++m_inputAccepted;
-    if (logsFrames()) {
+    const bool moved = dist > 0;
+    if (moved) ++m_inputAccepted;
+    else ++m_inputDiscarded;
+    if (moved && logsFrames()) {
         auto outputAt = [this](const QPointF &point) {
+            const QPoint pixel = baclickfx::logicalPixelAt(point);
             for (const LogicalOutput *out : effects->screens()) {
-                if (out && out->geometry().contains(point.toPoint())) {
+                if (out && out->geometry().contains(pixel)) {
                     return out;
                 }
             }
@@ -777,52 +779,70 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
             ++m_inputCrossScreen;
         }
     }
-    TrailSession *session = !m_trails.empty() && m_trails.back().active
-        ? &m_trails.back()
-        : nullptr;
-
-    if (trailEnabled() && session) {
-        // 按 TrailRenderer.m_MinVertexDistance 的累计路程离散采样。
-        const double minStep = std::max(1e-3, session->trailParams.minVertexDistancePx);
-        const baclickfx::PathResampleResult samples = baclickfx::resamplePathSegment(
-            m_lastDrag, pos, minStep, m_trailAccum);
-        for (const QPointF &next : samples.points) {
-            if (m_trailEmitValid) {
-                session->stream.addSegment(m_trailEmit, next);
+    if (session && trailEnabled()) {
+        TrailStream &stream = session->stream;
+        // Unity 每帧至多追加一个端点，阈值比较基于最近存储点的直线距离。
+        if (stream.empty()) {
+            if (moved || !m_autoTrailSession) {
+                stream.beginStroke(pos);
             }
-            m_trailEmit = next;
-            m_trailEmitValid = true;
-        }
-        m_trailAccum = samples.remainder;
-        if (samples.points.empty()) {
-            ++m_inputMerged;
+        } else if (stream.head() != pos) {
+            const QPointF last = stream.points().back().pos;
+            const QPointF delta = pos - last;
+            const double minStep = std::max(1e-3, session->trailParams.minVertexDistancePx);
+            if (QPointF::dotProduct(delta, delta) > minStep * minStep) {
+                stream.addSegment(last, pos);
+            } else {
+                ++m_inputMerged;
+            }
+            stream.setHead(pos);
         }
     }
 
-    if (m_enableDistanceEmitter && session) {
-        const double stepPx = distanceStepFromRing4(session->ring4Params);
-        if (std::isfinite(stepPx)) {
-            // rateOverDistance 的每次发射发生在路径跨过阈值的那个位置，不是本次
-            // pointer event 的终点。逐个求线段交点，保证低频长事件和高频短事件
-            // 得到相同的空间分布。
-            const baclickfx::PathResampleResult emissions = baclickfx::resamplePathSegment(
-                m_lastDrag, pos, stepPx, m_distAccum);
-            for (const QPointF &emissionPos : emissions.points) {
-                // maxNumParticles 的作用域是本次按下创建的 ParticleSystem；满员时跳过发射。
-                const int cap = session->ring4Params.maxParticles;
-                const int budget = cap > 0
-                    ? std::max(0, cap - liveDistanceParticles(m_dragSerial))
-                    : -1;
-                if (budget != 0) {
-                    TriBurstInstance inst = makeTriBurstInstance(emissionPos, session->ring4Params,
-                                                                 1, m_timeScale,
-                                                                 budget, m_rng);
-                    inst.dragSerial = m_dragSerial;
-                    m_bursts.push_back(std::move(inst));
-                }
+    if (m_enableDistanceEmitter && session && elapsed > 0) {
+        const float wallStep = float(elapsed);
+        const float simulationStep = float(elapsed * session->timeScale);
+        const double unit = session->ring4Params.worldUnitPx;
+        const QPointF delta = pos - m_lastDrag;
+        const baclickfx::unity::MotionVector emitterVelocity{
+            float(delta.x() / unit) / wallStep, -float(delta.y() / unit) / wallStep, 0};
+        const auto amount = baclickfx::unity::advanceDistanceEmission(session->emitter.emission,
+            float(session->ring4Params.rateOverDistance), emitterVelocity, simulationStep);
+        ParticleBirthFrame frame;
+        frame.emission = session->emitter.emission;
+        frame.rateCount = amount;
+        frame.step = simulationStep;
+        frame.simulationSpeed = float(session->timeScale);
+        frame.emitterVelocity = emitterVelocity;
+        const int cap = session->ring4Params.maxParticles;
+        const int available = cap > 0 ? std::max(0, cap - liveDistanceParticles(m_dragSerial))
+                                     : int(amount);
+        const int accepted = int(std::min<std::uint64_t>(std::uint64_t(available), amount));
+        if (accepted > 0) {
+            auto existing = std::find_if(m_bursts.begin(), m_bursts.end(), [this](const auto &burst) {
+                return burst.dragSerial == m_dragSerial;
+            });
+            if (existing == m_bursts.end()) {
+                TriBurstInstance inst;
+                inst.center = pos;
+                inst.dragSerial = m_dragSerial;
+                m_bursts.push_back(std::move(inst));
+                existing = std::prev(m_bursts.end());
             }
-            m_distAccum = emissions.remainder;
+            const baclickfx::unity::MotionVector offset{
+                float((pos.x() - existing->center.x()) / unit),
+                -float((pos.y() - existing->center.y()) / unit), 0};
+            frame.offset = simulationStep + existing->burst.simulationRemainder;
+            appendTriBurst(existing->burst, session->ring4Params, session->timeScale,
+                accepted, m_rng, session->emitter, frame, offset);
+            existing->life = existing->burst.durationSec;
         }
+        // 距离出生和时间发射共用余量 / RNG；源时间 rate 为零，仍逐模拟步更新。
+        const float tick = baclickfx::unity::simulationStep(simulationStep,
+            baclickfx::unity::sourceMaximumParticleTimestep);
+        baclickfx::unity::catchup(simulationStep, tick, 1.f, false, [&](float dt) {
+            baclickfx::unity::advanceConstantEmission(session->emitter.emission, {}, 0, dt, 1);
+        });
     }
 
     m_lastDrag = pos;
@@ -830,7 +850,7 @@ void BaClickFxEffect::updateDrag(const QPointF &pos)
 
 void BaClickFxEffect::handlePointerMotion(const QPointF &position)
 {
-    // 输入事件采样频率可高于帧率，因此能够保留快速拖动中的帧内转折点。
+    // 原生事件及时更新全屏过滤；几何和粒子发射统一在输出帧中处理。
     if (!m_dragging) {
         return;
     }
@@ -840,7 +860,8 @@ void BaClickFxEffect::handlePointerMotion(const QPointF &position)
     m_motionEventsWork = true;
     ++m_pointerMotionEvents;
     ++m_inputEvents;
-    updateDrag(position);
+    if (!isEffectAllowedAt(position, m_autoTrailSession ? InputPhase::Trigger : InputPhase::HeldMotion))
+        endDrag();
     if (logsFrames()) {
         m_inputCpuMsSinceLog += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - t0).count();
@@ -862,10 +883,7 @@ void BaClickFxEffect::endDrag()
     }
     m_dragging = false;
     m_autoTrailSession = false;
-    // 保留已有拖尾点自然淡出，只清除后续路径连接状态。
-    m_trailAccum = 0;
-    m_distAccum = 0;
-    m_trailEmitValid = false;
+    // 保留已有拖尾点自然淡出。
     if (!m_trails.empty()) {
         m_trails.back().active = false;
     }
@@ -873,19 +891,23 @@ void BaClickFxEffect::endDrag()
 
 Region BaClickFxEffect::contentRegion()
 {
-    QList<Rect> rects;
+    QList<Rect> bloomRects;
+    QList<Rect> letterBoxRects;
     qsizetype trailPointCount = 0;
     for (const TrailSession &session : m_trails) {
         trailPointCount += qsizetype(session.stream.points().size());
     }
-    rects.reserve(qsizetype(m_instances.size() + m_bursts.size()) + trailPointCount + 64);
+    bloomRects.reserve(qsizetype(m_instances.size()) + trailPointCount + 64);
+    letterBoxRects.reserve(qsizetype(m_instances.size() + m_bursts.size()));
 
     m_clickBaseBounds.clear();
     m_clickMeshBounds.clear();
+    m_clickTriBounds.clear();
     m_burstBounds.clear();
     m_trailBounds.clear();
     m_clickBaseBounds.reserve(m_instances.size());
     m_clickMeshBounds.reserve(m_instances.size());
+    m_clickTriBounds.reserve(m_instances.size());
     m_burstBounds.reserve(m_bursts.size());
     m_trailBounds.reserve(m_trails.size());
 
@@ -894,17 +916,19 @@ Region BaClickFxEffect::contentRegion()
         const QRectF mesh = clickMeshBounds(inst, m_meshes.cylinder002);
         m_clickBaseBounds.push_back(base);
         m_clickMeshBounds.push_back(mesh);
+        m_clickTriBounds.push_back(triBurstBounds(inst.center, inst.ring3));
+        appendDamageRect(letterBoxRects, m_clickTriBounds.back());
         if (base.isNull()) {
-            appendDamageRect(rects, mesh);
+            appendDamageRect(bloomRects, mesh);
         } else if (mesh.isNull()) {
-            appendDamageRect(rects, base);
+            appendDamageRect(bloomRects, base);
         } else {
-            appendDamageRect(rects, base.united(mesh));
+            appendDamageRect(bloomRects, base.united(mesh));
         }
     }
     for (const TriBurstInstance &inst : m_bursts) {
-        m_burstBounds.push_back(triBurstBounds(inst.center, inst.burst, inst.age));
-        appendDamageRect(rects, m_burstBounds.back());
+        m_burstBounds.push_back(triBurstBounds(inst.center, inst.burst));
+        appendDamageRect(letterBoxRects, m_burstBounds.back());
     }
     // 相邻线段分别加入 Region，避免整条轨迹退化为总包围盒。pad 覆盖 Ribbon、圆角
     // 和端帽的最大半径，因此仍为保守区域。
@@ -912,10 +936,11 @@ Region BaClickFxEffect::contentRegion()
         const double pad = std::max(6.0, session.trailParams.widthPx * 5.0);
         m_trailBounds.push_back(session.stream.boundingBox(pad));
         buildTrailStrokes(session.stream, session.trailParams, session.strokes);
-        appendTrailDamage(rects, session.stream, pad);
+        appendTrailDamage(bloomRects, session.stream, pad);
     }
 
-    return Region::fromUnsortedRects(rects);
+    m_lastBloomSource = Region::fromUnsortedRects(bloomRects);
+    return m_lastBloomSource.united(Region::fromUnsortedRects(letterBoxRects));
 }
 
 double BaClickFxEffect::bloomPadding() const
@@ -1000,35 +1025,51 @@ void BaClickFxEffect::prepareScreen(ScreenPrePaintData &data, std::chrono::nanos
 {
     const auto cpuStart = logsFrames() ? std::chrono::steady_clock::now()
                                      : std::chrono::steady_clock::time_point{};
-    // 兼容层统一提供合成器的呈现时间戳。
-    if (m_lastFrame.count() != 0 && now > m_lastFrame) {
-        // 限制会话恢复后的异常长时间步，避免实例在单帧内跳过全部生命周期。
-        const double dt = std::min(std::chrono::duration<double>(now - m_lastFrame).count(), 0.1);
-        // 保存真实呈现间隔供调试日志使用。
-        m_lastFrameDelta = std::chrono::duration<double, std::milli>(now - m_lastFrame).count();
-        advance(dt);
-    }
-    m_lastFrame = now;
+    // 光标所在输出驱动模拟和采样，混合刷新率屏幕的回调不会插入额外发射批次。
+    const QPointF cursor = effects->cursorPos();
+    const LogicalOutput *driver = effects->screenAt(baclickfx::logicalPixelAt(cursor));
+    const auto tick = m_frameClock.take(reinterpret_cast<std::uintptr_t>(data.screen),
+        reinterpret_cast<std::uintptr_t>(driver), now);
+    if (tick.accepted) {
+        const double elapsed = std::chrono::duration<double>(tick.elapsed).count();
+        m_lastFrameDelta = elapsed * 1000.0;
+        // TrailRenderer 读取受 Maximum Allowed Timestep 限制的游戏时钟。
+        // FX_Touch 粒子系统读取 unscaledDeltaTime，长帧按实际间隔追赶。
+        const double trailElapsed = std::min(elapsed,
+            double(baclickfx::unity::sourceMaximumAllowedTimestep));
+        for (TrailSession &session : m_trails) {
+            session.stream.advanceTime(trailElapsed);
+        }
 
-    // 持续拖尾只在光标近期确实移动时保持发射；停止移动后结束会话，让已有轨迹按
-    // Unity 的 0.3 秒寿命自然淡出，避免空闲时永久维持重绘循环。
-    if (m_autoTrailSession && !m_alwaysTrail
-        && std::chrono::steady_clock::now() - m_lastAutoTrailMotion
-            > kAutoTrailIdleTimeout) {
-        endDrag();
-    }
-
-    // 窗口也可能在鼠标不动时切为全屏；每帧同步过滤状态，停止当前发射。
-    if (m_dragging && !isEffectAllowedAt(effects->cursorPos(),
-            m_autoTrailSession ? InputPhase::Trigger : InputPhase::HeldMotion)) {
-        endDrag();
-    }
-
-    // pointerMotion 可用时避免重复轮询；不转发该事件的后端使用 cursorPos() 回退。
-    if (m_dragging && !m_motionEventsWork) {
-        ++m_inputEvents;
-        ++m_fallbackSamples;
-        updateDrag(effects->cursorPos());
+        if (m_autoTrailSession && !m_alwaysTrail
+            && std::chrono::steady_clock::now() - m_lastAutoTrailMotion > kAutoTrailIdleTimeout) {
+            endDrag();
+        }
+        // 每帧按最终光标位置执行发射；输入回调仍会立即停止跨入全屏的手势。
+        if (m_dragging && !isEffectAllowedAt(cursor,
+                m_autoTrailSession ? InputPhase::Trigger : InputPhase::HeldMotion)) {
+            endDrag();
+        }
+        const bool firstDragSample = m_dragging && !m_trails.empty()
+            && m_trails.back().firstSamplePending;
+        for (const PendingClick &click : m_pendingClicks) {
+            const bool followsFrameCursor = firstDragSample && !m_autoTrailSession
+                && click.firstSampleSerial == m_dragSerial
+                && isEffectAllowedAt(cursor);
+            spawn(followsFrameCursor ? cursor : click.position);
+        }
+        m_pendingClicks.clear();
+        if (m_dragging && (elapsed > 0 || firstDragSample)) {
+            if (!m_motionEventsWork) {
+                ++m_inputEvents;
+                ++m_fallbackSamples;
+            }
+            updateDrag(cursor, elapsed);
+        }
+        // 原生 TrailRenderer 先以本帧时刻落点，再回收过期点。
+        retireTrails();
+        // 原生距离出生先占用容量，再推进已有及新生粒子；新生年龄先扣掉待推进时间。
+        advance(elapsed);
     }
 
     // 仅申请特效覆盖区域，避免无关窗口参与重合成。
@@ -1076,7 +1117,7 @@ void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,
             continue;
         }
         const Region onOutput = m_lastDirty.intersected(out->geometry());
-        const Region sourceOnOutput = m_lastContent.intersected(out->geometry());
+        const Region sourceOnOutput = m_lastBloomSource.intersected(out->geometry());
         const double scale2 = out->scale() * out->scale();
         requestRects += onOutput.rects().size();
         bloomSourceRects += sourceOnOutput.rects().size();
@@ -1094,7 +1135,7 @@ void BaClickFxEffect::logFrameStats(const RenderViewport &viewport,
     const Rect outputLogical(alignedOutput.x(), alignedOutput.y(),
                              alignedOutput.width(), alignedOutput.height());
     const Region outputRequest = m_lastDirty.intersected(outputLogical);
-    const Region outputSource = m_lastContent.intersected(outputLogical);
+    const Region outputSource = m_lastBloomSource.intersected(outputLogical);
     const double outputScale2 = viewport.scale() * viewport.scale();
     const Rect scaledOutput = viewport.scaledRenderRect();
     const QString outputLabel = QStringLiteral("%1x%2@%3")
@@ -1382,7 +1423,7 @@ bool BaClickFxEffect::renderGpu(const RenderTarget &renderTarget, const RenderVi
     }
 
     // HDR FBO 与 Bloom 金字塔按整块输出分配并逐输出复用。
-    if (!m_gpu.prepareTargets(viewport)) {
+    if (!m_gpu.prepareTargets(renderTarget, viewport)) {
         ++m_skipTarget;
         m_lastSetupCpuMs = phaseMs();
         return false;
@@ -1393,6 +1434,7 @@ bool BaClickFxEffect::renderGpu(const RenderTarget &renderTarget, const RenderVi
     Q_ASSERT(m_trailBounds.size() == m_trails.size());
     Q_ASSERT(m_clickBaseBounds.size() == m_instances.size());
     Q_ASSERT(m_clickMeshBounds.size() == m_instances.size());
+    Q_ASSERT(m_clickTriBounds.size() == m_instances.size());
     Q_ASSERT(m_burstBounds.size() == m_bursts.size());
 
     // 背景导入使用 m_lastClearArea，以覆盖当前 dirty 之外的上一帧粒子。导入失败时
@@ -1404,7 +1446,7 @@ bool BaClickFxEffect::renderGpu(const RenderTarget &renderTarget, const RenderVi
     }
     m_lastSetupCpuMs = phaseMs();
 
-    // 队列 3000 的固定提交顺序：Trail、Ring/Ring3、Ring4。
+    // 原始材质队列：Trail / Ring / MeshTri = 4499；Ring3 / Ring4 = 4550。
     for (std::size_t i = 0; i < m_trails.size(); i++) {
         const TrailSession &session = m_trails[i];
         if (session.stream.empty()) {
@@ -1419,36 +1461,39 @@ bool BaClickFxEffect::renderGpu(const RenderTarget &renderTarget, const RenderVi
 
     for (std::size_t i = 0; i < m_instances.size(); i++) {
         ClickInstance &inst = m_instances[i];
-        // drawn 表示实例已经经过一次有效渲染帧，与它是否落在当前输出无关。
-        inst.drawn = true;
         if (m_clickBaseBounds[i].intersects(outputRect)) {
             m_gpu.renderClickBase(inst, origin);
         }
     }
 
-    for (std::size_t i = 0; i < m_bursts.size(); i++) {
-        TriBurstInstance &inst = m_bursts[i];
-        inst.drawn = true;
-        if (m_burstBounds[i].intersects(outputRect)) {
-            m_gpu.renderTriBurst(inst, origin);
-        }
-    }
-    m_gpu.flushTriBursts();
-
-    // Unity 按材质 Render Queue 全局排序：MeshTri=4499，其余粒子=3000。
-    // 因此所有点击实例与 Ring4 的 3000 层都结束后，才统一提交 MeshTri。
+    // UIAlwaysVisible 的同队列元素采用稳定的宿主顺序。
     for (std::size_t i = 0; i < m_instances.size(); i++) {
         const ClickInstance &inst = m_instances[i];
         if (m_clickMeshBounds[i].intersects(outputRect)) {
             m_gpu.renderClickMeshTri(inst, m_meshes.cylinder002, origin);
         }
     }
+    // 原版 LetterBox（Ring3 / Ring4）在 UI Bloom 之后绘制。
     m_lastParticleCpuMs = phaseMs();
-
-    // 最终合成使用已按 Bloom 半径外扩的 m_lastDirty；Bloom 金字塔从未外扩的
-    // m_lastContent 开始传播，避免重复计算影响半径。
-    m_gpu.endFrame(renderTarget, viewport, m_lastDirty, m_lastContent);
+    const bool bloomOk = m_gpu.updateBloom(renderTarget, m_lastBloomSource);
     m_lastFinishCpuMs = phaseMs();
+    for (std::size_t i = 0; i < m_instances.size(); i++) {
+        const ClickInstance &inst = m_instances[i];
+        if (m_clickTriBounds[i].intersects(outputRect)) {
+            m_gpu.renderClickAdditive(inst, origin);
+        }
+    }
+    for (std::size_t i = 0; i < m_bursts.size(); i++) {
+        TriBurstInstance &inst = m_bursts[i];
+        if (m_burstBounds[i].intersects(outputRect)) {
+            m_gpu.renderTriBurst(inst, origin);
+        }
+    }
+    m_gpu.flushTriBursts();
+    m_lastParticleCpuMs += phaseMs();
+
+    m_gpu.endFrame(renderTarget, viewport, m_lastDirty, bloomOk);
+    m_lastFinishCpuMs += phaseMs();
     m_paintedLastFrame = true;
     // 保存本帧合成区域，下一帧将其并入 KWin 重绘区以清除收缩后的差集。只保存最近
     // 一帧，避免历史区域持续扩大最终合成范围。
@@ -1468,18 +1513,11 @@ void BaClickFxEffect::postPaintScreen()
     };
 
     if (isActive()) {
-        // 还有内容存活（或仍在拖动），要下一帧。
-        if (!m_lastDirty.isEmpty()) {
-            requestRepaint(m_lastDirty);
-        } else if (m_dragging) {
-            // 拖动中但屏上暂时空着（例如关了拖尾、还没攒够一次连发）。
-            // 这时没有任何区域需要重画，但必须让帧循环继续：光标位置是在
-            // prePaintScreen 里按帧轮询的（m_motionEventsWork 为 false 的后端），
-            // 一旦停帧就再也收不到移动，距离发射器和拖尾都会停在原地。
-            // 请求 1×1 最小区域以维持下一帧输入轮询。
-            const QPointF c = effects->cursorPos();
-            effects->addRepaint(Rect(int(c.x()), int(c.y()), 1, 1));
-        }
+        requestRepaint(m_lastDirty);
+        // 旧粒子可能只留在另一块屏幕；光标所在输出仍须继续提供呈现时钟。
+        // 已覆盖光标时该点会合并进已有重绘区域。
+        const QPointF cursor = effects->cursorPos();
+        effects->addRepaint(Rect(baclickfx::logicalPixelAt(cursor), QSize(1, 1)));
     } else if (m_paintedLastFrame) {
         // 最后一帧：再要一次重绘，把残影擦掉。范围是上一帧真正铺过的那块。
         requestRepaint(m_lastPainted);
@@ -1487,10 +1525,11 @@ void BaClickFxEffect::postPaintScreen()
         m_lastPainted = Region();
         m_lastDirty = Region();
         m_lastContent = Region();
+        m_lastBloomSource = Region();
         m_lastClearArea = Region();
-        m_lastFrame = std::chrono::nanoseconds{0};
     }
 
+    if (!isActive()) m_frameClock.reset();
     effects->postPaintScreen();
 }
 
@@ -1519,12 +1558,9 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         // AlwaysTrail 会话已经在鼠标移动时建立；首个触发键按下只改变会话模式，
         // 不要结束并重新创建拖尾，否则一次点击或切换输入模式会产生断裂的新轨迹。
         if (!m_dragging) {
-            startDrag(pos);
+            startDrag(pos, true);
         }
         m_autoTrailSession = false;
-        m_lastDrag = pos;
-        m_trailEmit = pos;
-        m_trailEmitValid = true;
     } else if (transition.endsGesture()) {
         const bool suppressed = m_pressSuppressed;
         m_pressSuppressed = false;
@@ -1536,9 +1572,6 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
             // 下一次移动继续同一笔划，不产生断点或新的 TrailSession。
             m_autoTrailSession = true;
             m_lastAutoTrailMotion = std::chrono::steady_clock::now();
-            m_lastDrag = pos;
-            m_trailEmit = pos;
-            m_trailEmitValid = true;
         } else {
             endDrag();
         }
@@ -1558,12 +1591,14 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
         if (m_enableClick && isEffectAllowedAt(pos)) {
             for (const auto button : {Qt::LeftButton, Qt::RightButton, Qt::MiddleButton}) {
                 if (transition.pressed.testFlag(button)) {
-                    spawn(pos);
+                    const auto serial = !m_trails.empty() && m_trails.back().firstSamplePending
+                        ? m_dragSerial : std::uint64_t(0);
+                    m_pendingClicks.push_back({pos, serial});
                 }
             }
         }
         // 从非活动状态切换后启动帧循环；完整区域由 prePaintScreen() 申请。
-        effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
+        effects->addRepaint(Rect(baclickfx::logicalPixelAt(pos), QSize(1, 1)));
     }
 
     if (!transition.startsGesture() && pos != oldPos
@@ -1586,7 +1621,7 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
             const QPointF start = !isEffectAllowedAt(oldPos, phase) ? pos : oldPos;
             startDrag(start);
             m_autoTrailSession = !isDown;
-            effects->addRepaint(Rect(int(std::floor(pos.x())), int(std::floor(pos.y())), 1, 1));
+            effects->addRepaint(Rect(baclickfx::logicalPixelAt(pos), QSize(1, 1)));
         }
         if (!isDown) {
             m_autoTrailSession = true;
@@ -1596,7 +1631,7 @@ void BaClickFxEffect::slotMouseChanged(const QPointF &pos, const QPointF &oldPos
                                      : std::chrono::steady_clock::time_point{};
         m_motionEventsWork = true;
         ++m_inputEvents;
-        updateDrag(pos);
+        // 只记录输入活动；prepareScreen 每帧读取一次最新光标位置。
         if (logsFrames()) {
             m_inputCpuMsSinceLog += std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();

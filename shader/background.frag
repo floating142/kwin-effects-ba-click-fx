@@ -15,5 +15,8 @@ out vec4 out_color;
 void main()
 {
     // 桌面和 Unity cameraTarget 均视为不透明。
-    out_color = vec4(tfDecode(texture(u_texture, v_texcoord).rgb), 1.0);
+    vec3 linearOutput = tfDecode(texture(u_texture, v_texcoord).rgb);
+    // 粒子贴图及顶点颜色采用游戏的线性 BT.709；背景必须进入同一空间再混合。
+    // 不裁剪负分量，保留广色域背景往返转换所需的信息。
+    out_color = vec4((u_colorMatrix * vec4(linearOutput, 0.0)).rgb, 1.0);
 }

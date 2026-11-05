@@ -84,11 +84,4 @@ Rng::Rng()
 {
 }
 
-double Rng::range(double a, double b)
-{
-    if (a == b)
-        return a;
-    return std::uniform_real_distribution<double>(a, b)(m_engine);
-}
-
 } // namespace baclickfx

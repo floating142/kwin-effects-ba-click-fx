@@ -5,6 +5,8 @@
 
 #include "curvedata.h"
 #include "curveutils.h"
+#include "unity/gradient.h"
+#include <memory>
 
 namespace baclickfx {
 
@@ -24,6 +26,10 @@ struct Subsystem {
 
     // 曲线；空视图使用求值函数的回退值。
     ScalarCurve sizeCurve;
+    double sizeCurveMultiplier = 1.0;
+    int renderQueue = 3000;
+    float minParticleSize = 0, maxParticleSize = 1;
+    float billboardContextScale = 1, cameraWorldUnitPx = 540, cameraHorizontalSpan = 3.5555556f;
     ColorCurve colorStops;
     ScalarCurve alphaStops;
     int gradientMode = 0;
@@ -82,9 +88,9 @@ struct Subsystem {
     const char *textureAsset = nullptr;
     bool textureClamp = true;
 
-    // InitialModule.startColor 与 ColorOverLifetime 在线性空间相乘。Ring3/Ring4 的
-    // 0.5377358 灰色在 Apply Active Color Space 后约为 0.2506 线性能量。
+    // 起始色先量化为 RGBA8，与缓存寿命色相乘后再解码至线性空间。
     Rgb startColor{1.0, 1.0, 1.0};
+    std::shared_ptr<const unity::Gradient> particleGradient;
 
     // ParticleSystem.maxNumParticles 作用于单个 ParticleSystem 实例。达到上限时
     // Unity 跳过新粒子；0 表示不限制。
@@ -96,9 +102,7 @@ struct Subsystem {
     // 所有像素域参数、发射间距和包围盒计算均从该值派生。
     double worldUnitPx = 0.0;
     int lifetimeMs = 0;
-    double localScalePx = 0.0;
     double sizePx = 0.0;
-    double speedPxPerSec = 0.0;
     double widthPx = 0.0;
     double minVertexDistancePx = 0.0;
     double hdrGain = 1.0;
@@ -122,33 +126,15 @@ struct SubsystemMap {
  * @return 已完成逻辑像素换算的参数集合。
  */
 SubsystemMap buildSubsystemMap(double timeScale, double globalScale,
-                               double outputHeightPx = kReferenceHeightPx);
+                               double outputHeightPx = kReferenceHeightPx, double outputWidthPx = 1920.0);
+
+/// 采用原生 billboard min/max 裁限，返回投影后的逻辑像素半尺寸。
+double billboardHalfSize(const Subsystem &params, float startSize, float curve, float percentAge);
 
 // 采样辅助函数
 
 /// 计算 `[0, 1]` 范围内的生命周期进度。
 double subProgress(double lifetimeMs, double tMs);
-
-/// 采样 Unity MinMaxConstant；模式 3 使用两个端点之间的均匀随机值。
-double sampleMinMaxConstant(int mode, double scalar, double minScalar, Rng &rng);
-
-/// 按 startLifetime 模式采样生命周期，单位为秒。
-double sampleStartLifetimeSec(const Subsystem &p, Rng &rng);
-
-/// 采样相对 `Subsystem::size` 的初始尺寸倍率。
-double sampleStartSizeMul(const Subsystem &p, Rng &rng);
-
-/// 采样粒子初始旋转角，单位为弧度。
-double sampleStartRotation(const Subsystem &p, Rng &rng);
-
-/// 采样粒子初始速度，单位保持为 Unity 世界单位每秒。
-double sampleStartSpeedPx(const Subsystem &p, Rng &rng);
-
-/// 采样并限制每粒子的归一化 UV 起始帧。
-double sampleUvStartFrameNorm(const Subsystem &p, Rng &rng);
-
-/// 采样每粒子的非负 UV frame-over-time 值。
-double sampleUvFrameOverTimeNorm(const Subsystem &p, Rng &rng);
 
 /// 纹理图集中单帧的 UV 缩放和偏移。
 struct UvTile {
@@ -184,7 +170,7 @@ struct Rgba {
 /**
  * 采样颜色与透明度曲线。
  *
- * 返回的 RGB 已从 sRGB 解码并乘以 `startColor`；Alpha 保持线性值。
+ * 先按原生 RGBA8 规则组合 startColor 与寿命渐变，再将最终 RGB 解码至线性。
  */
 Rgba subColor(const Subsystem &p, double progress, double fallbackAlpha = 1.0);
 
