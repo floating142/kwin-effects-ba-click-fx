@@ -388,6 +388,15 @@ void LogicTests::particleColorsMatchNativeSnapshots()
     }
 }
 
+// The snapshots were captured on one CPU. Unity's SSE reciprocal and
+// reciprocal-square-root estimates can round differently on another CPU,
+// even after refinement. The native oracles still compare bits on one CPU.
+static constexpr float nativeBirthPositionTolerance = 5e-7f; // World units.
+static constexpr float nativeBirthVelocityTolerance = 2e-7f; // World units per second.
+static constexpr float nativeBirthAgeTolerance = 1e-4f; // Percentage points.
+static constexpr float nativeTrailPositionTolerance = 1e-5f; // World units, including miter amplification.
+static constexpr float nativeTrailUTolerance = 5e-7f;
+
 void LogicTests::triangleBirthMatchesNativeDispatcher()
 {
     const auto map = baclickfx::buildSubsystemMap(1, 1, 1080);
@@ -409,8 +418,8 @@ void LogicTests::triangleBirthMatchesNativeDispatcher()
         for (int axis = 0; axis < 3; ++axis) {
             QCOMPARE(std::bit_cast<std::uint32_t>(particle.worldMotion.position[std::size_t(axis)]),
                 std::bit_cast<std::uint32_t>(float(position[axis].toDouble())));
-            QCOMPARE(std::bit_cast<std::uint32_t>(particle.worldMotion.velocity[std::size_t(axis)]),
-                std::bit_cast<std::uint32_t>(float(velocity[axis].toDouble())));
+            QCOMPARE_LE(std::abs(particle.worldMotion.velocity[std::size_t(axis)] - float(velocity[axis].toDouble())),
+                nativeBirthVelocityTolerance);
         }
         // Source world velocities already include the emitter scale once.
         auto moved = particle;
@@ -450,11 +459,16 @@ void LogicTests::birthFrameTimingAndCapacityMatchNative()
         for (int i = 0; i < expected.size(); ++i) {
             const auto value = expected[i].toObject();
             const auto &actual = burst.particles[std::size_t(previous+i)];
+            const auto position = value[QStringLiteral("position")].toArray();
+            const auto velocity = value[QStringLiteral("velocity")].toArray();
             for (int axis = 0; axis < 3; ++axis) {
-                QCOMPARE(actual.worldMotion.position[std::size_t(axis)], float(value[QStringLiteral("position")].toArray()[axis].toDouble()));
-                QCOMPARE(actual.worldMotion.velocity[std::size_t(axis)], float(value[QStringLiteral("velocity")].toArray()[axis].toDouble()));
+                QCOMPARE_LE(std::abs(actual.worldMotion.position[std::size_t(axis)] - float(position[axis].toDouble())),
+                    nativeBirthPositionTolerance);
+                QCOMPARE_LE(std::abs(actual.worldMotion.velocity[std::size_t(axis)] - float(velocity[axis].toDouble())),
+                    nativeBirthVelocityTolerance);
             }
-            QCOMPARE(actual.percentAge, float(value[QStringLiteral("age")].toDouble()));
+            QCOMPARE_LE(std::abs(actual.percentAge - float(value[QStringLiteral("age")].toDouble())),
+                nativeBirthAgeTolerance);
         }
     }
 }
@@ -478,9 +492,14 @@ void LogicTests::trailMeshAndPackedColorsMatchNative()
         const auto expected = row[QStringLiteral("vertices")].toArray();
         QCOMPARE(vertices.size(),std::size_t(expected.size()));
         for (int i = 0; i < expected.size(); ++i) {
-            const auto value = expected[i].toArray();const auto &v = vertices[std::size_t(i)];
-            QCOMPARE(v.position[0],float(value[0].toDouble()));QCOMPARE(v.position[1],float(value[1].toDouble()));
-            QCOMPARE(v.u,float(value[2].toDouble()));QCOMPARE(v.v,float(value[3].toDouble()));
+            const auto value = expected[i].toArray();
+            const auto &v = vertices[std::size_t(i)];
+            for (int axis = 0; axis < 2; ++axis) {
+                QCOMPARE_LE(std::abs(v.position[std::size_t(axis)] - float(value[axis].toDouble())),
+                    nativeTrailPositionTolerance);
+            }
+            QCOMPARE_LE(std::abs(v.u - float(value[2].toDouble())), nativeTrailUTolerance);
+            QCOMPARE(v.v, float(value[3].toDouble()));
             const auto rgba = std::uint32_t(value[4].toDouble());
             const auto color = evalTrailGradientColor(trail,v.u);
             for (int channel = 0; channel < 3; ++channel)
