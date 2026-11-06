@@ -26,8 +26,8 @@ constexpr ScalarStop kDefaultWidthCurve[] = {
     {0.0, 1.0},
 };
 
-// 补全可选字段并计算逻辑像素域派生量。
-void finalize(Subsystem &s, double ts, double worldUnitPx)
+// 补全固定源参数并建立只读渐变缓存。
+void prepareSource(Subsystem &s)
 {
     // MinMaxConstant 的端点未给出时退化为对应的标量本身。
     s.startLifetimeScalar = resolve(s.startLifetimeScalar, s.lifetimeSec);
@@ -45,13 +45,6 @@ void finalize(Subsystem &s, double ts, double worldUnitPx)
     if (s.widthCurve.empty())
         s.widthCurve = ScalarCurve(kDefaultWidthCurve);
 
-    s.lifetimeMs = static_cast<int>(std::max(16.0, jsRound((s.lifetimeSec * 1000) / ts)));
-
-    // Renderer 尺寸包含局部缩放；World 速度由发射器另行计算。
-    s.worldUnitPx = worldUnitPx;
-    s.sizePx = s.size * s.localScale * worldUnitPx;
-    s.widthPx = s.widthMultiplier * worldUnitPx;
-    s.minVertexDistancePx = s.minVertexDistance * worldUnitPx;
     s.hdrGain = (s.hdrColor[0] + s.hdrColor[1] + s.hdrColor[2]) / 3;
     // ColorOverLifetime 缓存使用 uint16 时间和 RGBA8，不在浮点域直接乘色。
     auto gradient = std::make_shared<unity::Gradient>();
@@ -75,9 +68,15 @@ void finalize(Subsystem &s, double ts, double worldUnitPx)
 
 SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outputHeightPx, double outputWidthPx)
 {
-    SubsystemMap m;
-
-    configureTouchSubsystems(m);
+    static const SubsystemMap source = [] {
+        SubsystemMap params;
+        configureTouchSubsystems(params);
+        for (Subsystem *s : {&params.ring, &params.ring3, &params.ring4, &params.meshTri, &params.trail}) {
+            prepareSource(*s);
+        }
+        return params;
+    }();
+    SubsystemMap m = source;
 
     // Unity 固定 UI Pass 的正交相机 orthographicSize = 1.0，垂直视锥范围为
     // 2 * kUnityOrthographicSize 个世界单位。因此世界到屏幕的投影比例为：
@@ -86,10 +85,14 @@ SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outp
     const double worldUnitPx = height / (2.0 * kUnityOrthographicSize) * globalScale;
 
     for (Subsystem *s : {&m.ring, &m.ring3, &m.ring4, &m.meshTri, &m.trail}) {
-        finalize(*s, timeScale, worldUnitPx);
-        s->billboardContextScale = float(s->localScale) * float(globalScale);
-        s->cameraWorldUnitPx = float(height * .5);
-        s->cameraHorizontalSpan = float((outputWidthPx > 0 ? outputWidthPx : 1920) / (height * .5));
+        s->lifetimeMs = static_cast<int>(std::max(16.0, jsRound((s->lifetimeSec * 1000) / timeScale)));
+        // Renderer 尺寸包含局部缩放；World 速度由发射器另行计算。
+        s->worldUnitPx = worldUnitPx;
+        s->sizePx = s->size * s->localScale * worldUnitPx;
+        s->widthPx = s->widthMultiplier * worldUnitPx;
+        s->minVertexDistancePx = s->minVertexDistance * worldUnitPx;
+        s->billboard = {float(s->localScale) * float(globalScale), float(height * .5),
+            float((outputWidthPx > 0 ? outputWidthPx : 1920) / (height * .5))};
     }
 
     return m;
@@ -97,11 +100,17 @@ SubsystemMap buildSubsystemMap(double timeScale, double globalScale, double outp
 
 double billboardHalfSize(const Subsystem &params, float startSize, float curve, float percentAge)
 {
+    return billboardHalfSize(params, startSize, curve, percentAge, params.billboard);
+}
+
+double billboardHalfSize(const Subsystem &params, float startSize, float curve, float percentAge,
+                         const Subsystem::BillboardProjection &projection)
+{
     const auto limits = unity::particleBillboardLimits(params.minParticleSize, params.maxParticleSize,
-        params.billboardContextScale, params.cameraHorizontalSpan, 20.f, true);
+        projection.contextScale, projection.horizontalSpan, 20.f, true);
     volatile float size = startSize * std::max(0.f, curve);
     const auto half = unity::particleBillboardHalfExtents(size, size, limits[2], limits[3], percentAge);
-    return double(half[0]) * params.billboardContextScale * params.cameraWorldUnitPx;
+    return double(half[0]) * projection.contextScale * projection.worldUnitPx;
 }
 
 double subProgress(double lifetimeMs, double tMs)

@@ -1,22 +1,22 @@
 # FX_Touch 原版核对
 
-本轮基准为 PC 原游戏的 `resources.assets` 中 `FX_Touch`，不是重建 Unity 工程。
+本轮基准为 PC 原游戏中的 `FX_Touch`。
 源参数、纹理像素哈希和网格数据保存在
 [`tests/fixtures/unity-touch.json`](../tests/fixtures/unity-touch.json)。
 
 ## 来源与生成
 
-| 文件 | SHA-256 |
+| 来源 | SHA-256 |
 | --- | --- |
-| resources.assets | `1134d2665b11be54a6a9d80749b2dae52dacc3d035118f81619d9d14bfccc0cf` |
-| resources.assets.resS | `7b54cd45ff30c472e592296e6f7393075df837c787cf96a0a6c9f03fd55cf2b7` |
-| UnityPlayer.dll | `3f696bcf12b9bc6a4efe26193bdc7f209aee48d9a717e415c773cc5de155b5b3` |
+| 游戏资源表 | `1134d2665b11be54a6a9d80749b2dae52dacc3d035118f81619d9d14bfccc0cf` |
+| 游戏纹理流 | `7b54cd45ff30c472e592296e6f7393075df837c787cf96a0a6c9f03fd55cf2b7` |
+| Unity 原生运行库 | `3f696bcf12b9bc6a4efe26193bdc7f209aee48d9a717e415c773cc5de155b5b3` |
 
 `scripts/import-unity-touch.py` 沿实际 GameObject / Transform / Component 引用读取
-Prefab。`src/curvedata.h` 和 `src/touchparams.h` 从源快照生成；有效关键帧数量、原始
+Prefab。`src/particles/curvedata.h` 和 `src/particles/touchparams.h` 从源快照生成；有效关键帧数量、原始
 uint16 渐变时间、非加权曲线切线、初始参数端点、材质颜色与队列均保留源值。
 发现未支持的模式或新启用模块时生成器报错。根 ParticleSystem 已确认关闭发射，
-不是遗漏的第五层粒子。沿 `TouchEffectCreater.Camera` 引用确认原 `level1` 中 Camera 143
+不是遗漏的第五层粒子。沿 `TouchEffectCreater.Camera` 引用确认原始场景中的 Camera 143
 为正交 UICamera、orthographicSize=1；场景哈希和相机字段也记录在快照中。
 原版 `UIRenderPass.Execute`（`0x6c60fd6` 起）及 `GetProjectionMatrixByAspect`
 （`0x6c62650`）给出普通投影的横向范围 ±宽高比和纵向范围 ±1，近远面为
@@ -29,13 +29,9 @@ uint16 渐变时间、非加权曲线切线、初始参数端点、材质颜色�
 ```bash
 # 无需游戏文件或第三方 Python 库；检查已提交的数据表。
 python3 scripts/import-unity-touch.py --check
-
-# 更新原始快照与数据表；仅维护时使用，需要 UnityPy 和匹配的本地游戏资源。
-python3 scripts/import-unity-touch.py --extract /path/to/BlueArchive_Data/resources.assets
 ```
 
-四张 PNG 的尺寸和解码后 RGBA 像素与 PC 原资源完全一致。另一个本地 Android 包
-使用较低分辨率和 ASTC 压缩；它不作为 PC 画面的贴图基准。
+仓库中四张 PNG 的尺寸和解码后 RGBA 像素与 PC 原资源完全一致。
 `Cylinder002.obj` 的顶点、三角形和逐角 UV 也与原 Mesh 对照；投影时显式还原 OBJ
 导出的 X 镜像，并把 Unity 的 Y 向上转换为屏幕的 Y 向下。
 导入时从各 Renderer 的首个材质槽解析实际材质与贴图引用，
@@ -48,14 +44,14 @@ Aniso=1、MipBias=0；Circle / Trail 为 Repeat，Grad_Ring3 / Triangle 为 Clam
 材质的全部纹理变换均为 Scale=(1,1)、Offset=(0,0)，未启用 CustomData UV 偏移。
 这些字段已加入原资源快照及导入检查，避免只验证 PNG 像素而遗漏采样状态。
 
-原 PC `globalgamemanagers.assets` 的 `UIRenderBloomSettings` 也已直接读取：
+原版 PC 的 `UIRenderBloomSettings` 数值已记录在参数快照中。
 Intensity=1.7000000476837158、Threshold=1、SoftKnee=0、Clamp=65472、Diffusion=7、
 AnamorphicRatio=0、Color=(1,1,1,1)，Shader 指向 `Hidden/MXFinalBloom`（62）。
-反汇编匹配 GameAssembly 的 `UIRenderPass.RenderBloom`（0x6c629f0）确认：半尺寸
+原版反汇编中的 `UIRenderPass.RenderBloom`（0x6c629f0）确认：半尺寸
 金字塔、log2 / Diffusion 级数、GammaToLinear 阈值与 Clamp、1e-5 knee，以及
 `exp(Intensity / 10 * ln(2)) - 1` 的强度换算与当前路径相符。
 
-## 本轮修正
+## 实现对照
 
 | 路径 | 原差异 | 当前行为 |
 | --- | --- | --- |
@@ -132,16 +128,13 @@ ICC、HDR 元数据、驱动与面板的最终观感验收。
 本组 gamma22 最终输出相对参考的最大编码通道差为 0.000489。
 移动亮源的局部重绘测试使用整张金字塔重算作参考，并覆盖亮源消失。
 
-Unity 的 `applyActiveColorSpace` 在最终粒子颜色传到 GPU 前进行线性颜色转换，见
-[Unity 官方说明](https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/particlesystemrenderer/applyactivecolorspace)。
+Unity 的 `applyActiveColorSpace` 在最终粒子颜色传到 GPU 前进行线性颜色转换。
 RGBA8 缓存和整数乘法细节以本地匹配 UnityPlayer 原函数为依据。
 
 ## 原函数验证
 
-`src/unity/` 中 Initial、Shape、Circle、Gradient、Curve、UV 和私有随机流内核，
-参考 `kde-shittim-lockscreen/src/fx/particles/` 与
-`kde-shittim-lockscreen/src/core/ShittimUnityRandom.h` 的复刻实现；保留单精度操作
-顺序。旋转模块本轮从同一 DLL 追加反汇编和直接调用验证。
+[数值内核](../src/unity)保留单精度操作顺序。原生验证直接执行哈希匹配的函数，
+测试快照记录运行结果。
 
 | 项目 | 对照结果 |
 | --- | --- |
@@ -167,14 +160,9 @@ RGBA8 缓存和整数乘法细节以本地匹配 UnityPlayer 原函数为依据�
 管线 `0xae4300` 在积分 `0xadd7a0` 之前求旋转角速度。旋转调用保留原算术，不补丁
 浮点计算；部分既有颜色 oracle 为原函数提供独立 Windows TLS 和静态缓存。
 
-专项验证需要 Linux x86-64、C++ 编译器、Qt6Core、Python `pefile` / `capstone`，
-Qt6Gui（完整出生验证），以及本地锁屏开发工程和上述匹配 DLL：
-
-```bash
-python3 scripts/verify-unity-native.py \
-  --reference-root /path/to/kde-shittim-lockscreen-dev \
-  --unity-player /path/to/UnityPlayer.dll
-```
+[原函数验证工具](../scripts/verify-unity-native.py)提供可选的专项验证入口。
+需要 Linux x86-64、C++ 编译器、Qt6Core、Qt6Gui、Python `pefile` 和 `capstone`，
+以及匹配的原版运行库和参考夹具。
 
 此脚本只在临时目录提取和重定位经过哈希校验的函数，构造时写入，运行前改为 RX，
 不使用同时可写可执行的页面。仓库不保存游戏 DLL 或机器码片段。维护者可显式加 `--write-snapshot`
@@ -217,11 +205,11 @@ node ID。插件采用稳定提交顺序。Ring 的目标衰减会使其与其�
 已重新执行参考项目的原生比较器测试，5,407,488 对构造记录与移植比较器一致。
 测试输入提供这些状态字段，游戏实时填入的值仍需实机记录。
 
-本机日服安装的 UnityPlayer 哈希与上表相同。安装版资源
-`resources.assets`（SHA-256 `ba94eaecdfd1ec92610e38fa55d9a969af58f3f4cd8e056adace240ab58ad282`）
+另一版日服客户端的 Unity 原生运行库哈希与上表相同。其资源表
+（SHA-256 `ba94eaecdfd1ec92610e38fa55d9a969af58f3f4cd8e056adace240ab58ad282`）
 重新提取后生成相同的 C++ 参数表。改号的四张贴图仍指向相同名称与 RGBA 像素，
 Shape 里的网格引用仍指向 FX_MESH_Triangle；四个材质对应的三套着色器压缩程序哈希相同。
-新版 GameAssembly 的 IL2CPP 注册表也指向相同的调用顺序。
+新版客户端的 IL2CPP 注册表也指向相同的调用顺序。
 `0x6e4764b` 写入 CommonTransparent，`0x6e48820` 提交 UIAlwaysVisible，
 `0x6e48876` 执行 RenderBloom，`0x6e489a7` 提交 LetterBox。
 
@@ -268,6 +256,5 @@ TrailRenderer 在 `0xde5058..0xde5072` 读取游戏时钟，先采样新点
 
 ## 逐帧画面对照
 
-按本轮要求暂不执行固定种子、输入历史和帧时刻的原游戏完整画面对照。因此本记录
-证明的是所列原参数、数值函数及组合路径的范围；不宣称整台 Unity Player 与 KWin
-每帧逐像素相同。后续画面验收应分别比较几何、线性 HDR 粒子层、Bloom 和最终输出。
+实机对照需要固定原游戏种子、输入历史与帧时刻，分别比较几何、线性 HDR 粒子层、
+Bloom 和最终输出，并记录同队列绘制顺序和输入归帧。

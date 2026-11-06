@@ -4,22 +4,23 @@
 #pragma once
 #include <QSizeF>
 
-#include "applicationfilter.h"
+#include "input/applicationfilter.h"
 #include "baclickfxdefaults.h"
-#include "clickinstance.h"
-#include "curveutils.h"
-#include "gpurenderer.h"
+#include "particles/clickinstance.h"
+#include "particles/curveutils.h"
+#include "render/gpurenderer.h"
 #include "kwincompat.h"
-#include "frameclock.h"
-#include "meshprofiles.h"
-#include "subsystems.h"
-#include "trailstream.h"
+#include "input/frameclock.h"
+#include "render/meshprofiles.h"
+#include "particles/subsystems.h"
+#include "particles/trailstream.h"
 
 #include <core/region.h>
 
 #include <QLoggingCategory>
 #include <QHash>
 #include <QPointF>
+#include <QPointer>
 #include <QJsonObject>
 #include <QUuid>
 
@@ -64,7 +65,8 @@ private:
 
     /// 底层场景成功后，将粒子和拖尾合成到当前输出。
     void paintOverlay(const RenderTarget &renderTarget, const RenderViewport &viewport,
-                       const Region &deviceRegion) override;
+                      const Region &deviceRegion, LogicalOutput *screen) override;
+    void releaseRenderDevice(const RenderDevice *device) override;
 
     /// 原生移动事件立即更新过滤状态；轨迹在呈现帧中采样。
     void handlePointerMotion(const QPointF &position) override;
@@ -80,6 +82,7 @@ private:
     /// 推进实例状态并移除寿命结束的对象。
     void advance(double dt);
     void retireTrails();
+    bool needsAnimationFrame() const;
 
     /**
      * 渲染当前输出上的全部活动内容。
@@ -87,16 +90,20 @@ private:
      * @return 成功提交可见内容时返回 `true`；无内容或渲染目标初始化失败时返回
      * `false`。
      */
-    bool renderGpu(const RenderTarget &renderTarget, const RenderViewport &viewport);
+    bool renderGpu(GPURenderer &gpu, const RenderTarget &renderTarget,
+                   const RenderViewport &viewport, const LogicalOutput *screen,
+                   const QRectF &outputRect);
+    void watchOutput(LogicalOutput *screen);
+    void invalidateOutputTargets(LogicalOutput *screen);
 
     /// 绘制 damage 诊断叠层；青色为插件申请区域。
     void drawDebugDamage(const RenderTarget &renderTarget, const RenderViewport &viewport);
 
-    /// 返回不含 Bloom 外扩的保守稀疏内容区域，使用全局逻辑坐标。
-    Region contentRegion();
+    /// 缓存 Bloom 前后的几何区域和渲染数据，使用全局逻辑坐标。
+    void updateContentRegions();
 
-    /// 按各输出 Bloom 最大传播半径扩展内容区域。
-    Region dirtyRegion(const Region &content) const;
+    /// 按各输出的色彩模式和 Bloom 传播半径计算重绘区。
+    Region dirtyRegion() const;
 
     /// 返回当前输出的 Bloom 逻辑像素外扩半径。
     double bloomPadding() const;
@@ -108,7 +115,7 @@ private:
     void startDrag(const QPointF &pos, bool awaitFirstSample = false);
 
     /// 根据累计路径距离追加拖尾采样并触发 Ring4 发射。
-    void updateDrag(const QPointF &pos, double elapsed);
+    void updateDrag(const QPointF &pos, double elapsed, LogicalOutput *output);
 
     /// 结束拖动会话；已有拖尾点继续按寿命老化。
     void endDrag();
@@ -128,7 +135,6 @@ private:
     double outputScaleForPos(const QPointF &pos) const;
 
     /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
-    int liveDistanceParticles(std::uint64_t dragSerial) const;
 
     /// 按 KWin 输入语义返回 `pos` 处最上层可接收输入的窗口。
     Window *inputWindowAt(const QPointF &pos) const;
@@ -182,6 +188,7 @@ private:
     std::vector<TriBurstInstance> m_bursts;
     struct TrailSession {
         TrailStream stream;
+        QPointer<LogicalOutput> output;
         double timeScale = 1.0;
         baclickfx::Subsystem trailParams;
         baclickfx::Subsystem ring4Params;
@@ -193,9 +200,7 @@ private:
     std::vector<TrailSession> m_trails;
 
     // 渲染器状态；OpenGL 资源在 paintScreen() 中延迟初始化。
-    GPURenderer m_gpu;
-    bool m_gpuReady = false;
-    bool m_gpuTried = false;
+    GpuRendererCache m_gpu;
 
     // 拖动采样状态
     // 上一次采样到的指针位置。
@@ -203,6 +208,7 @@ private:
 
     // 帧时钟；0 表示第一帧仅建立时间基准。
     baclickfx::OutputFrameClock m_frameClock;
+    bool m_dragIdle = false;
 
     // 用于输入诊断：是否收到原生移动通知；几何始终逐呈现帧采样。
     bool m_motionEventsWork = false;
@@ -213,8 +219,11 @@ private:
     // 未做 Bloom 外扩的内容区域。
     Region m_lastContent;
     Region m_lastBloomSource;
+    Region m_lastPostBloom;
+    // 输入回调可在下一个模拟帧之前创建拖尾会话。
+    bool m_contentRegionsDirty = true;
 
-    // contentRegion() 为当前模拟快照计算的保守包围盒；逐输出渲染只做相交判断，
+    // updateContentRegions() 为当前模拟快照计算的保守包围盒；逐输出渲染只做相交判断，
     // 避免多输出重复求值曲线、三角函数和 MeshTri 顶点。
     std::vector<QRectF> m_clickBaseBounds;
     std::vector<QRectF> m_clickMeshBounds;
@@ -236,13 +245,17 @@ private:
 
     // 性能统计状态，仅在帧统计级别及以上更新。记录 CPU 分段、异步 GPU 计时、呈现
     // 间隔，以及插件申请区域与 KWin 实际重绘区域的差异。
-    void logFrameStats(const RenderViewport &viewport, const Region &deviceRegion, double cpuMs);
+    void logFrameStats(GpuRendererCache::Entry &entry, const RenderViewport &viewport,
+                       const Region &deviceRegion, const LogicalOutput *screen, double cpuMs);
     void resetFrameStats();
 
     struct OutputFrameStats
     {
+        QString mode;
         int frames = 0;
         int gpuSamples = 0;
+        double cpuMsSum = 0.0;
+        double cpuMaxMs = 0.0;
         double gpuImportMsSum = 0.0;
         double gpuBloomMsSum = 0.0;
         double gpuCompositeMsSum = 0.0;
@@ -295,7 +308,6 @@ private:
     double m_statGpuBloomMsSum = 0.0;
     double m_statGpuCompositeMsSum = 0.0;
     int m_statGpuSamples = 0;
-    std::uint64_t m_lastGpuSampleSerial = 0;
     double m_statFrameMsSum = 0.0;
     double m_statFrameMsMax = 0.0;
     double m_statDevicePxSum = 0.0;   // KWin 实际重画的设备像素数

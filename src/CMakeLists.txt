@@ -2,12 +2,12 @@
 
 add_library(kwin4_effect_ba_click_fx MODULE)
 
-target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE
+set_property(SOURCE effect/baclickfxeffect.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     BA_CLICK_FX_BUILD_ID="${BA_CLICK_FX_BUILD_ID}"
     BA_CLICK_FX_KWIN_VERSION="${KWin_VERSION}"
 )
 
-# KWin 6.8 为默认 API；只有旧版本启用适配，版本宏仅供 kwincompat 使用。
+# KWin 6.8 为默认 API；旧版差异集中在生命周期和渲染上下文管理。
 # 6.6 从 prePaintScreen 参数获取时间戳，且没有 pointerMotion 回调。
 if(KWin_VERSION VERSION_LESS "6.7.0")
     target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE BA_CLICK_FX_KWIN_LEGACY_PREPAINT)
@@ -29,22 +29,23 @@ set_property(TARGET kwin4_effect_ba_click_fx PROPERTY AUTOMOC_MACRO_NAMES
 )
 
 target_sources(kwin4_effect_ba_click_fx PRIVATE
-    baclickfxeffect.cpp
-    kwincompat.cpp
-    applicationfilter.cpp
-    gpurenderer.cpp
-    gputexture.cpp
-    clickinstance.cpp
-    trailstream.cpp
-    curveutils.cpp
-    diagnostics.cpp
-    damageutils.cpp
-    bloomutils.cpp
-    pathresampler.cpp
-    subsystems.cpp
-    meshprofiles.cpp
+    effect/baclickfxeffect.cpp
+    effect/kwincompat.cpp
+    input/applicationfilter.cpp
+    render/gpurenderer.cpp
+    render/gputexture.cpp
+    particles/clickinstance.cpp
+    particles/trailstream.cpp
+    particles/curveutils.cpp
+    effect/diagnostics.cpp
+    render/damageutils.cpp
+    render/bloomutils.cpp
+    particles/subsystems.cpp
+    render/meshprofiles.cpp
     main.cpp
 )
+
+target_include_directories(kwin4_effect_ba_click_fx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(kwin4_effect_ba_click_fx PRIVATE
     KWin::kwin

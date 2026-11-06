@@ -7,14 +7,12 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace KWin
 {
 
 using baclickfx::Rgb;
 using baclickfx::clamp;
-using baclickfx::jsRound;
 
 namespace
 {
@@ -126,8 +124,13 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
             data.sourcePoints[i] = {{float(point.pos.x()), float(point.pos.y()), 0.f},
                                     point.birthTime, 1};
         }
-        const QPointF head = strokeEnd == pts.size() && stream.head()
-            ? *stream.head() : pts[strokeEnd - 1].pos;
+        const auto liveHead = strokeEnd == pts.size() ? stream.head() : std::nullopt;
+        const QPointF head = liveHead.value_or(pts[strokeEnd - 1].pos);
+        const auto worldUnitAt = [&](std::size_t i) {
+            const double unit = liveHead && i + 1 == count
+                ? stream.headWorldUnitPx() : pts[strokeStart + i].worldUnitPx;
+            return unit > 0 ? unit : trail.worldUnitPx;
+        };
         baclickfx::unity::prepareTrailPoints(data.sourcePoints, 0, count,
             {float(head.x()), float(head.y()), 0.f}, true, stream.time(), stream.lifetime(),
             data.preparedPoints, data.emissionFlags);
@@ -150,7 +153,10 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
             StrokeSample sample;
             sample.pos = position(i);
             sample.headT = headT;
-            sample.width = baseWidth * sampleTrailWidthFactor(trail, headT);
+            const double pointUnit = worldUnitAt(i);
+            const double pointWidth = pointUnit == trail.worldUnitPx
+                ? baseWidth : std::max(0.01, trail.widthMultiplier * pointUnit);
+            sample.width = pointWidth * sampleTrailWidthFactor(trail, headT);
             sample.textureU = 1.0 - sampleTrailTextureU(trail, pathLength, data.totalLength);
             sample.alpha = evalTrailGradientAlpha(trail, headT);
             sample.color = evalTrailGradientColor(trail, headT);
@@ -160,15 +166,32 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
 
         if (data.samples.size() >= 2) {
             data.ribbonOrigin = head;
-            const double unit = trail.worldUnitPx;
+            const double unit = worldUnitAt(count - 1);
+            data.worldUnitPx = unit;
             data.ribbonInput.resize(count);
+            bool mixedProjection = false;
             for (std::size_t i = 0; i < count; ++i) {
                 const auto &p = data.preparedPoints[i];
                 data.ribbonInput[i] = {float((double(p[0]) - head.x()) / unit),
                                       -float((double(p[1]) - head.y()) / unit)};
+                mixedProjection |= worldUnitAt(count - 1 - i) != unit;
             }
             baclickfx::unity::buildLineRibbon(data.ribbonInput, float(trail.widthMultiplier),
                 trail.numCornerVertices, trail.numCapVertices, data.ribbonScratch, data.ribbon);
+            // 跨屏时按采样点的倍率调整相对中心线的宽度，保持笔划与渐变连续。
+            if (mixedProjection) {
+                for (auto &vertex : data.ribbon) {
+                    const double pointUnit = worldUnitAt(count - 1 - vertex.sample);
+                    if (pointUnit == unit) {
+                        continue;
+                    }
+                    const auto &center = data.ribbonInput[vertex.sample];
+                    for (std::size_t axis = 0; axis < 2; ++axis) {
+                        const double offset = double(vertex.position[axis]) - center[axis];
+                        vertex.position[axis] = float(center[axis] + offset * (pointUnit / unit));
+                    }
+                }
+            }
             for (std::size_t i = 0; i < count; ++i) {
                 auto &sample = data.samples[count - 1 - i];
                 sample.headT = data.ribbonScratch.progress[i];
@@ -186,26 +209,26 @@ void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &tr
 
 // TrailStream
 
-void TrailStream::pushPoint(const QPointF &p, bool penUp)
+void TrailStream::pushPoint(const QPointF &p, bool penUp, double worldUnitPx)
 {
-    m_points.push_back(TrailPoint{p, float(m_time), penUp});
-    m_head = p;
+    m_points.push_back(TrailPoint{p, float(m_time), penUp, worldUnitPx});
+    setHead(p, worldUnitPx);
     if (m_points.size() > kMaxPoints) {
         m_points.pop_front();
     }
 }
 
-void TrailStream::beginStroke(const QPointF &p)
+void TrailStream::beginStroke(const QPointF &p, double worldUnitPx)
 {
-    pushPoint(p, true);
+    pushPoint(p, true, worldUnitPx);
 }
 
-void TrailStream::addSegment(const QPointF &from, const QPointF &to)
+void TrailStream::addSegment(const QPointF &from, const QPointF &to, double worldUnitPx)
 {
     if (m_points.empty()) {
-        pushPoint(from, true);
+        pushPoint(from, true, worldUnitPx);
     }
-    pushPoint(to, false);
+    pushPoint(to, false, worldUnitPx);
 }
 
 bool TrailStream::retireExpired(double lifeSec)
@@ -246,52 +269,6 @@ QRectF TrailStream::boundingBox(double padPx) const
     }
     return QRectF(minX - padPx, minY - padPx,
                   (maxX - minX) + padPx * 2, (maxY - minY) + padPx * 2);
-}
-
-
-// 距离发射器
-
-TriBurstInstance makeTriBurstInstance(const QPointF &pos, const baclickfx::Subsystem &ring4,
-                                      int emitEvents, double timeScale, int countCap,
-                                      baclickfx::Rng &rng, ParticleEmitterState *state)
-{
-    TriBurstInstance inst;
-    inst.center = pos;
-    // 包围盒半径取 1 个 Unity 世界单位。
-    inst.halfSize = jsRound(2.0 * ring4.worldUnitPx) / 2;
-
-    // Unity 的 rateOverDistance 是「每单位距离发射多少个」，一帧内可能攒够多次，
-    // 所以这里按累计的触发次数放大 burst 数量，而不是丢掉多余的。
-    int burstCount =
-        std::max(1, static_cast<int>(jsRound(static_cast<double>(ring4.distanceBurst) * emitEvents)));
-    // countCap < 0 表示不限；否则按 Ring (4) 的 maxNumParticles 收口（见调用方）。
-    if (countCap >= 0) {
-        burstCount = std::min(burstCount, countCap);
-    }
-    inst.burst = emitTriBurst(ring4, timeScale, burstCount, rng, state);
-    // 与粒子进度共用精确 durationSec，避免毫秒四舍五入提前截掉最后一小段。
-    inst.life = inst.burst.durationSec;
-    return inst;
-}
-
-double distanceStepFromRing4(const baclickfx::Subsystem &ring4)
-{
-    if (ring4.rateOverDistance <= 0) {
-        return std::numeric_limits<double>::infinity();
-    }
-
-    // Unity 的 rateOverDistance 单位是「发射器每移动一个世界单位发射几个」，
-    // 于是间距 = 1/rateOverDistance 个世界单位。再用子系统派生的
-    // worldUnitPx（= 输出高度/(2 × orthographicSize) × globalScale）换到像素：
-    //
-    //     1080p、globalScale=1 时 540 / 5.0 = 108 逻辑像素一个
-    //
-    // worldUnitPx 里已经含 globalScale：整套特效放大时，发射器在世界空间里走过的
-    // "距离"也按同一比例缩放，否则放大后三角密度会跟着变，比例关系就跑了。
-    //
-    // rateOverDistance 是 PS17 的固定参数。非正值已在上方转换为无穷大；其余值
-    // 保持原始单位换算，避免隐藏参数错误。
-    return ring4.worldUnitPx / ring4.rateOverDistance;
 }
 
 } // namespace KWin

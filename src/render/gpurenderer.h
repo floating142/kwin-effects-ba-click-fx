@@ -20,12 +20,12 @@
 
 #pragma once
 
-#include "clickinstance.h"
+#include "particles/clickinstance.h"
 #include "baclickfxdefaults.h"
-#include "curveutils.h"
+#include "particles/curveutils.h"
 #include "meshprofiles.h"
-#include "subsystems.h"
-#include "trailstream.h"
+#include "particles/subsystems.h"
+#include "particles/trailstream.h"
 
 #include <effect/effect.h>
 #include <opengl/glframebuffer.h>
@@ -38,6 +38,7 @@
 #include <QString>
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -46,6 +47,9 @@ namespace KWin
 
 class RenderTarget;
 class RenderViewport;
+class ColorDescription;
+class EglContext;
+class RenderDevice;
 
 /// 粒子顶点格式，对应 Unity 的 POSITION、TEXCOORD0、COLOR 和 CustomData0。
 struct ParticleVertex {
@@ -68,12 +72,16 @@ public:
     bool initialize();
 
     /**
-     * 准备当前输出的 HDR 场景纹理和辉光金字塔。
+     * 准备当前输出的 HDR 场景纹理。辉光金字塔按需创建。
      *
-     * 资源按输出逻辑矩形和缩放缓存。OpenGL 上下文无效或资源分配失败时返回
-     * `false`。
+     * 每个输出保留当前视口的一套资源。资源分配失败时返回 `false`。
      */
-    bool prepareTargets(const RenderTarget &renderTarget, const RenderViewport &viewport);
+    bool prepareTargets(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                        const LogicalOutput *output = nullptr);
+
+    /// 标记指定输出的资源待释放。实际释放必须在 OpenGL 上下文中进行。
+    bool invalidateOutput(const LogicalOutput *output);
+    void releaseInvalidatedTargets();
 
     /**
      * 导入桌面背景并开始渲染当前输出的 HDR 帧。
@@ -105,7 +113,7 @@ public:
     /// 一次性提交此前由 renderTriBurst() 追加的全部 Ring4 几何。
     void flushTriBursts();
 
-    /// 绘制拖尾；宽度和纹理重复间距从 `params.worldUnitPx` 派生。
+    /// 绘制已按采样输出缩放的拖尾网格。
     void renderTrail(const std::vector<StrokeData> &strokes,
                      const baclickfx::Subsystem &params,
                      const QPointF &outputOrigin);
@@ -132,10 +140,17 @@ public:
     double lastGpuBloomMs() const { return m_lastGpuBloomMs; }
     double lastGpuCompositeMs() const { return m_lastGpuCompositeMs; }
     QString lastGpuOutput() const { return m_lastGpuOutput; }
+    QString lastGpuOutputId() const { return m_lastGpuOutputId; }
     std::uint64_t gpuSampleSerial() const { return m_gpuSampleSerial; }
 
     /// 返回 GPU、已加载资源和逐输出渲染目标的稳定诊断摘要。
     QString diagnosticStatus() const;
+
+    /// 输出标识和显示模式分开记录，避免相同尺寸的输出被合并统计。
+    static QString statsOutputId(const LogicalOutput *output, const QPointF &viewportOrigin);
+
+    /// 广色域转换或 HDR 亮度范围可能使桌面像素进入辉光预筛选。
+    static bool desktopCanContributeBloom(const ColorDescription &color);
 
     /**
      * 计算辉光在单个输出上的最大逻辑像素传播半径。
@@ -234,6 +249,8 @@ private:
     // 因此每块输出长期复用一套完整尺寸的资源。
     struct OutputTargets
     {
+        const LogicalOutput *output = nullptr;
+        bool invalidated = false;
         // 使用 QRectF 以确保边界语义与后续 Qt 几何计算一致。
         QRectF renderRect;  // 全局逻辑矩形和缓存键。
         double scale = 1.0; // 输出缩放和缓存键。
@@ -252,6 +269,7 @@ private:
         std::unique_ptr<GLFramebuffer> bgFbo;
 
         std::vector<BloomLevel> bloomLevels;
+        std::chrono::steady_clock::time_point bloomRetryAt{};
         std::vector<Region> downRegions;
         std::vector<Region> upRegions;
 
@@ -261,6 +279,7 @@ private:
         // 上一帧的原始亮源区域。辉光更新使用它与当前亮源区域的并集，使消失的亮源
         // 同样能够使金字塔失效并被清除。
         Region previousBloomSourceRegion;
+        std::shared_ptr<const ColorDescription> previousBloomColor;
 
         // PPv2 的 `_SampleScale`，由 Diffusion 和输出尺寸计算。
         float bloomSampleScale = 1.0f;
@@ -271,10 +290,12 @@ private:
     OutputTargets *m_current = nullptr; // 由 prepareTargets() 选择的当前输出。
 
     /// 按 PPv2 Diffusion 公式为输出创建辉光金字塔并计算采样半径。
-    bool prepareBloomPyramid(OutputTargets &targets, const QSize &devicePx);
+    bool prepareBloomPyramid(OutputTargets &targets);
+    bool prepareBackgroundTargets();
 
     /// 执行辉光预筛选、降采样和上采样链。
     bool renderBloom(const Region &globalChangedRegion);
+    bool needsFullBloomRefresh(const ColorDescription &color) const;
 
     /// 恢复 beginFrame() 入口处的混合、视口和裁剪状态。
     void restoreBlendState();
@@ -326,6 +347,7 @@ private:
         bool publishable = false;
         int issuedPhases = 0;
         QString output;
+        QString outputId;
     };
 
     void collectGpuTimings();
@@ -349,11 +371,44 @@ private:
     double m_lastGpuBloomMs = -1.0;
     double m_lastGpuCompositeMs = -1.0;
     QString m_lastGpuOutput;
+    QString m_lastGpuOutputId;
     std::uint64_t m_gpuSampleSerial = 0;
     QString m_gpuVendor;
     QString m_gpuRenderer;
     QString m_gpuVersion;
     bool m_lastImportDirect = false;
+};
+
+/// FBO、VAO 和查询对象必须在创建它们的 EGL 上下文中使用和释放。
+class GpuRendererCache
+{
+public:
+    struct Entry {
+    private:
+        friend class GpuRendererCache;
+        EglContext *context = nullptr;
+        std::shared_ptr<EglContext> contextRef;
+        const RenderDevice *device = nullptr;
+
+    public:
+        GPURenderer renderer;
+        bool ready = false;
+        std::uint64_t lastGpuSampleSerial = 0;
+    };
+
+    ~GpuRendererCache();
+    Entry *current(const RenderDevice *device = nullptr);
+    void configure(baclickfx::defaults::LogLevel level, bool profiling);
+    void invalidateOutput(const LogicalOutput *output);
+    void releaseDevice(const RenderDevice *device);
+    bool ready() const;
+    QString diagnosticStatus() const;
+
+private:
+    void releaseEntries(const RenderDevice *device, bool failedOnly);
+    std::vector<std::unique_ptr<Entry>> m_entries;
+    baclickfx::defaults::LogLevel m_logLevel = baclickfx::defaults::kLogLevelDefault;
+    bool m_profiling = false;
 };
 
 } // namespace KWin

@@ -455,8 +455,8 @@ def generate(data):
               f'inline constexpr float sourceMaximumAllowedTimestep = {number(data["timing"]["Maximum Allowed Timestep"])}f;',
               f'inline constexpr float sourceMaximumParticleTimestep = {number(data["timing"]["Maximum Particle Timestep"])}f;',
               '}']
-    return {ROOT / 'src/curvedata.h': '\n'.join(curves) + '\n',
-            ROOT / 'src/touchparams.h': '\n'.join(params) + '\n',
+    return {ROOT / 'src/particles/curvedata.h': '\n'.join(curves) + '\n',
+            ROOT / 'src/particles/touchparams.h': '\n'.join(params) + '\n',
             ROOT / 'src/unity/timing.h': '\n'.join(timing) + '\n'}
 
 

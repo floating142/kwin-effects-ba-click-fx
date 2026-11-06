@@ -2,16 +2,15 @@
 
 add_executable(ba_click_fx_logic_tests
     logic_tests.cpp
-    ${CMAKE_SOURCE_DIR}/src/applicationfilter.cpp
-    ${CMAKE_SOURCE_DIR}/src/curveutils.cpp
-    ${CMAKE_SOURCE_DIR}/src/trailstream.cpp
-    ${CMAKE_SOURCE_DIR}/src/clickinstance.cpp
-    ${CMAKE_SOURCE_DIR}/src/subsystems.cpp
-    ${CMAKE_SOURCE_DIR}/src/damageutils.cpp
-    ${CMAKE_SOURCE_DIR}/src/bloomutils.cpp
-    ${CMAKE_SOURCE_DIR}/src/pathresampler.cpp
-    ${CMAKE_SOURCE_DIR}/src/meshprofiles.cpp
-    ${CMAKE_SOURCE_DIR}/src/diagnostics.cpp
+    ${CMAKE_SOURCE_DIR}/src/input/applicationfilter.cpp
+    ${CMAKE_SOURCE_DIR}/src/particles/curveutils.cpp
+    ${CMAKE_SOURCE_DIR}/src/particles/trailstream.cpp
+    ${CMAKE_SOURCE_DIR}/src/particles/clickinstance.cpp
+    ${CMAKE_SOURCE_DIR}/src/particles/subsystems.cpp
+    ${CMAKE_SOURCE_DIR}/src/render/damageutils.cpp
+    ${CMAKE_SOURCE_DIR}/src/render/bloomutils.cpp
+    ${CMAKE_SOURCE_DIR}/src/render/meshprofiles.cpp
+    ${CMAKE_SOURCE_DIR}/src/effect/diagnostics.cpp
 )
 
 target_include_directories(ba_click_fx_logic_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -50,14 +49,14 @@ if(BA_CLICK_FX_BUILD_GPU_TESTS AND KWin_VERSION VERSION_GREATER_EQUAL "6.8.0")
     if(TARGET OpenGL::EGL)
         add_executable(ba_click_fx_gpu_tests
             gpu_tests.cpp
-            ${CMAKE_SOURCE_DIR}/src/gputexture.cpp
-            ${CMAKE_SOURCE_DIR}/src/gpurenderer.cpp
-            ${CMAKE_SOURCE_DIR}/src/curveutils.cpp
-            ${CMAKE_SOURCE_DIR}/src/clickinstance.cpp
-            ${CMAKE_SOURCE_DIR}/src/trailstream.cpp
-            ${CMAKE_SOURCE_DIR}/src/subsystems.cpp
-            ${CMAKE_SOURCE_DIR}/src/meshprofiles.cpp
-            ${CMAKE_SOURCE_DIR}/src/bloomutils.cpp
+            ${CMAKE_SOURCE_DIR}/src/render/gputexture.cpp
+            ${CMAKE_SOURCE_DIR}/src/render/gpurenderer.cpp
+            ${CMAKE_SOURCE_DIR}/src/particles/curveutils.cpp
+            ${CMAKE_SOURCE_DIR}/src/particles/clickinstance.cpp
+            ${CMAKE_SOURCE_DIR}/src/particles/trailstream.cpp
+            ${CMAKE_SOURCE_DIR}/src/particles/subsystems.cpp
+            ${CMAKE_SOURCE_DIR}/src/render/meshprofiles.cpp
+            ${CMAKE_SOURCE_DIR}/src/render/bloomutils.cpp
         )
         target_include_directories(ba_click_fx_gpu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(ba_click_fx_gpu_tests PRIVATE

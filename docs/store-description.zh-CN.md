@@ -25,11 +25,7 @@ KWin 原生特效与 KWin 的精确版本 ABI 绑定。升级 KWin 后，需要�
 
 ## 安装
 
-请从 GitHub Releases 下载源码压缩包，例如：
-
-```text
-kwin-effects-ba-click-fx-1.0.0.tar.xz
-```
+请从本项目的 GitHub Releases 下载源码压缩包。
 
 本项目应从源码包安装，不提供通用的预编译二进制包。
 解压后，在源码目录运行：
@@ -43,7 +39,7 @@ kwin-effects-ba-click-fx-1.0.0.tar.xz
 
 安装后打开：
 
-**系统设置 → 窗口管理 → 桌面特效**
+**系统设置 → 外观与样式 → 桌面特效**
 
 搜索 **BA Click FX** 并启用。首次安装或升级 KWin 后，如果特效没有出现，请注销并重新登录 Plasma。
 

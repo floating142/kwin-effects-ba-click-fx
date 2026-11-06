@@ -4,8 +4,8 @@
 #include "baclickfxconfig.h"
 
 #include "baclickfxdefaults.h"
-#include "outputscaleutils.h"
-#include "mousebuttonutils.h"
+#include "render/outputscaleutils.h"
+#include "input/mousebuttonutils.h"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -43,6 +43,7 @@
 #include <QTreeWidget>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 
@@ -305,21 +306,17 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     connect(m_ui.showOutputScaleCheckBox, &QCheckBox::toggled, this, [this](bool enabled) {
         m_ui.outputScaleGroupBox->setVisible(enabled && !m_outputSliders.isEmpty());
         updateGlobalScaleVisibility();
-        if (enabled) {
-            // 启用单独缩放时固定每块显示器当前滑条值。之后调整整体缩放不再
-            // 改变这些显示器的实际倍率，除非用户直接调整对应显示器滑条。
-            for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
-                m_outputOverrides.insert(it.key());
-            }
-        }
         markAsChanged();
         sendPreview();
     });
-    connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen *) {
+    const auto scheduleOutputRefresh = [this]() {
+        m_outputRefreshPending = true;
         if (!needsSave()) m_outputRefreshDebounce.start();
-    });
-    connect(qApp, &QGuiApplication::screenRemoved, this, [this](QScreen *) {
-        if (!needsSave()) m_outputRefreshDebounce.start();
+    };
+    connect(qApp, &QGuiApplication::screenAdded, this, scheduleOutputRefresh);
+    connect(qApp, &QGuiApplication::screenRemoved, this, scheduleOutputRefresh);
+    connect(this, &KCModule::needsSaveChanged, this, [this]() {
+        if (!needsSave() && m_outputRefreshPending) m_outputRefreshDebounce.start();
     });
     m_outputRefreshDebounce.setSingleShot(true);
     m_outputRefreshDebounce.setInterval(100);
@@ -330,15 +327,6 @@ BaClickFxEffectConfig::BaClickFxEffectConfig(QObject *parent, const KPluginMetaD
     m_previewDebounce.setInterval(75);
     connect(&m_previewDebounce, &QTimer::timeout,
             this, &BaClickFxEffectConfig::dispatchPreview);
-    m_outputRefreshTimeout.setSingleShot(true);
-    m_outputRefreshTimeout.setInterval(2000);
-    connect(&m_outputRefreshTimeout, &QTimer::timeout, this, [this]() {
-        if (m_outputRefreshWatcher) {
-            m_outputRefreshWatcher->disconnect(this);
-            m_outputRefreshWatcher->deleteLater();
-            m_outputRefreshWatcher = nullptr;
-        }
-    });
 }
 
 BaClickFxEffectConfig::~BaClickFxEffectConfig()
@@ -483,12 +471,12 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
     layout->setSpacing(8);
     if (m_outputScaleContainer) {
         layout->removeWidget(m_outputScaleContainer);
+        m_outputScaleContainer->hide();
         m_outputScaleContainer->deleteLater();
         m_outputScaleContainer = nullptr;
     }
     m_outputSliders.clear();
     m_outputLabels.clear();
-    m_outputNames.clear();
     m_outputResetButtons.clear();
     m_outputOverrides.clear();
     auto *container = new QWidget(m_ui.outputScaleGroupBox);
@@ -496,11 +484,8 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
     rows->setContentsMargins(0, 0, 0, 0);
     rows->setSpacing(8);
     m_outputScaleContainer = container;
-    const QJsonObject values = QJsonDocument::fromJson(
-        KSharedConfig::openConfig(QStringLiteral("kwinrc"))
-            ->group(QLatin1String(def::kGroup))
-            .readEntry(def::kOutputScaleOverrides, QByteArray())).object();
-    const double global = m_ui.globalScaleSlider->value() / double(kSliderScale);
+    container->setEnabled(!m_outputRefreshWatcher);
+    const QJsonObject values = editedOutputScaleOverrides();
     for (QScreen *screen : QGuiApplication::screens()) {
         const QString fallbackId = baclickfx::outputScaleId(
             screen->manufacturer(), screen->model(), screen->serialNumber(), screen->name());
@@ -508,8 +493,6 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
         auto *rowWidget = new QWidget(container);
         auto *row = new QHBoxLayout(rowWidget);
         row->setContentsMargins(0, 0, 0, 0);
-        // QScreen::devicePixelRatio() may be rounded independently of KWin's
-        // fractional output scale. Logical DPI preserves the actual 1.60 factor.
         const QSize native = m_outputNativeSizes.value(screen->name(), screen->size());
         const QString displayName = QStringLiteral("%1 (%2x%3)")
             .arg(screen->name())
@@ -523,11 +506,8 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
         reset->setIcon(QIcon::fromTheme(QStringLiteral("edit-undo")));
         reset->setAccessibleName(i18n("Reset to 1.00"));
         slider->setRange(int(def::kGlobalScaleMin * kSliderScale), int(def::kGlobalScaleMax * kSliderScale));
-        const bool has = values.contains(id);
-        if (has || m_ui.showOutputScaleCheckBox->isChecked()) {
-            m_outputOverrides.insert(id);
-        }
-        slider->setValue(int((has ? values.value(id).toDouble(global) : global) * kSliderScale));
+        slider->setValue(int(std::lround(baclickfx::configuredOutputScale(values, id, fallbackId)
+                                        * kSliderScale)));
         value->setMinimumWidth(40);
         reset->setAutoRaise(true);
         row->addWidget(name);
@@ -537,7 +517,6 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
         rows->addWidget(rowWidget);
         m_outputSliders.insert(id, slider);
         m_outputLabels.insert(id, value);
-        m_outputNames.insert(id, name);
         m_outputResetButtons.insert(id, reset);
         value->setText(QString::number(slider->value() / double(kSliderScale), 'f', 2));
         reset->setEnabled(slider->value() != int(def::kGlobalScaleDefault * kSliderScale));
@@ -569,18 +548,21 @@ void BaClickFxEffectConfig::rebuildOutputScaleEditors()
 
 void BaClickFxEffectConfig::refreshOutputMetadata()
 {
+    m_outputRefreshPending = false;
+    m_outputRefreshDebounce.stop();
     QDBusMessage message = QDBusMessage::createMethodCall(
         QStringLiteral("org.kde.KWin"), QStringLiteral("/Effects"),
         QStringLiteral("org.kde.kwin.Effects"), QStringLiteral("debug"));
     message << QStringLiteral("kwin4_effect_ba_click_fx") << QStringLiteral("outputs-json");
     if (m_outputRefreshWatcher) {
+        m_outputRefreshWatcher->disconnect(this);
         m_outputRefreshWatcher->deleteLater();
-        m_outputRefreshWatcher = nullptr;
     }
+    // 防止 KWin 返回 UUID 前把用户修改写入优先级较低的备用键。
+    if (m_outputScaleContainer) m_outputScaleContainer->setEnabled(false);
     auto *watcher = new QDBusPendingCallWatcher(
-        QDBusConnection::sessionBus().asyncCall(message), this);
+        QDBusConnection::sessionBus().asyncCall(message, 2000), this);
     m_outputRefreshWatcher = watcher;
-    m_outputRefreshTimeout.start();
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
             [this](QDBusPendingCallWatcher *call) {
         const QDBusPendingReply<QString> reply = *call;
@@ -601,12 +583,11 @@ void BaClickFxEffectConfig::refreshOutputMetadata()
                         output.value(QStringLiteral("pixelWidth")).toInt(),
                         output.value(QStringLiteral("pixelHeight")).toInt()));
                 }
-                if (!needsSave()) rebuildOutputScaleEditors();
             }
         }
+        m_outputRefreshWatcher = nullptr;
         call->deleteLater();
-        m_outputRefreshTimeout.stop();
-        if (m_outputRefreshWatcher == call) m_outputRefreshWatcher = nullptr;
+        rebuildOutputScaleEditors();
     });
 }
 
@@ -627,8 +608,8 @@ void BaClickFxEffectConfig::load()
         m_ui.showOutputScaleCheckBox->setChecked(
             conf.readEntry(def::kOutputScaleEnabled, def::kOutputScaleEnabledDefault));
     }
-    rebuildOutputScaleEditors();
     refreshOutputMetadata();
+    rebuildOutputScaleEditors();
 
     m_ui.enableClickCheckBox->setChecked(
         conf.readEntry(def::kEnableClick, def::kEnableClickDefault));
@@ -665,6 +646,21 @@ void BaClickFxEffectConfig::load()
     setNeedsSave(false);
 }
 
+QJsonObject BaClickFxEffectConfig::editedOutputScaleOverrides() const
+{
+    const KConfigGroup conf = KSharedConfig::openConfig(QStringLiteral("kwinrc"))
+                                  ->group(QLatin1String(def::kGroup));
+    QJsonObject overrides = m_outputOverridesReset
+        ? QJsonObject()
+        : QJsonDocument::fromJson(conf.readEntry(def::kOutputScaleOverrides, QByteArray())).object();
+    for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
+        if (m_outputOverrides.contains(it.key())) {
+            overrides.insert(it.key(), it.value()->value() / double(kSliderScale));
+        }
+    }
+    return overrides;
+}
+
 void BaClickFxEffectConfig::save()
 {
     KConfigGroup conf = KSharedConfig::openConfig(QStringLiteral("kwinrc"))
@@ -672,18 +668,8 @@ void BaClickFxEffectConfig::save()
 
     conf.writeEntry(def::kTimeScale, m_ui.timeScaleSlider->value() / double(kSliderScale));
     conf.writeEntry(def::kGlobalScale, m_ui.globalScaleSlider->value() / double(kSliderScale));
-    QJsonObject overrides = m_outputOverridesReset
-        ? QJsonObject()
-        : QJsonDocument::fromJson(conf.readEntry(def::kOutputScaleOverrides, QByteArray())).object();
-    for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
-        if (m_outputOverrides.contains(it.key())) {
-            overrides.insert(it.key(), it.value()->value() / double(kSliderScale));
-        } else {
-            overrides.remove(it.key());
-        }
-    }
     conf.writeEntry(def::kOutputScaleOverrides,
-                    QJsonDocument(overrides).toJson(QJsonDocument::Compact));
+                    QJsonDocument(editedOutputScaleOverrides()).toJson(QJsonDocument::Compact));
     conf.writeEntry(def::kOutputScaleEnabled, m_ui.showOutputScaleCheckBox->isChecked());
 
     conf.writeEntry(def::kEnableClick, m_ui.enableClickCheckBox->isChecked());
@@ -706,6 +692,7 @@ void BaClickFxEffectConfig::save()
     conf.writeEntry(def::kDebugDamage, m_ui.debugDamageCheckBox->isChecked());
 
     conf.sync();
+    m_outputOverrides.clear();
     m_outputOverridesReset = false;
 
     KCModule::save();
@@ -766,13 +753,7 @@ void BaClickFxEffectConfig::dispatchPreview()
                                m_ui.showOutputScaleCheckBox->isChecked()}};
     preview.insert(QStringLiteral("excludedApplications"),
                    baclickfx::excludedApplicationsToJson(m_excludedApplications));
-    QJsonObject outputOverrides;
-    for (auto it = m_outputSliders.cbegin(); it != m_outputSliders.cend(); ++it) {
-        if (m_outputOverrides.contains(it.key())) {
-            outputOverrides.insert(it.key(), it.value()->value() / double(kSliderScale));
-        }
-    }
-    preview.insert(QStringLiteral("outputScaleOverrides"), outputOverrides);
+    preview.insert(QStringLiteral("outputScaleOverrides"), editedOutputScaleOverrides());
     preview.insert(QStringLiteral("enableTrail"), m_ui.enableTrailCheckBox->isChecked());
     preview.insert(QStringLiteral("alwaysTrail"), m_ui.alwaysTrailCheckBox->isChecked());
     preview.insert(QStringLiteral("enableDistanceEmitter"),

@@ -22,14 +22,17 @@ struct Subsystem {
     double localScale = 1.0;
     double rateOverDistance = 0.0;
     int clickBurst = 0;
-    int distanceBurst = 1;
 
     // 曲线；空视图使用求值函数的回退值。
     ScalarCurve sizeCurve;
     double sizeCurveMultiplier = 1.0;
     int renderQueue = 3000;
     float minParticleSize = 0, maxParticleSize = 1;
-    float billboardContextScale = 1, cameraWorldUnitPx = 540, cameraHorizontalSpan = 3.5555556f;
+    struct BillboardProjection {
+        float contextScale = 1;
+        float worldUnitPx = 540;
+        float horizontalSpan = 3.5555556f;
+    } billboard;
     ColorCurve colorStops;
     ScalarCurve alphaStops;
     int gradientMode = 0;
@@ -130,6 +133,8 @@ SubsystemMap buildSubsystemMap(double timeScale, double globalScale,
 
 /// 采用原生 billboard min/max 裁限，返回投影后的逻辑像素半尺寸。
 double billboardHalfSize(const Subsystem &params, float startSize, float curve, float percentAge);
+double billboardHalfSize(const Subsystem &params, float startSize, float curve, float percentAge,
+                         const Subsystem::BillboardProjection &projection);
 
 // 采样辅助函数
 

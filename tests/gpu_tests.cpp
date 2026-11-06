@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "gpurenderer.h"
-#include "gputexture.h"
-#include "bloomutils.h"
+#include "render/gpurenderer.h"
+#include "render/gputexture.h"
+#include "render/bloomutils.h"
 
+#include <core/backendoutput.h>
+#include <core/output.h>
 #include <core/rendertarget.h>
 #include <core/renderviewport.h>
 #include <opengl/eglcontext.h>
@@ -29,10 +31,18 @@ private Q_SLOTS:
     void srgbUploadDecodesAndPreservesState();
     void darkBackgroundRoundTrips_data();
     void darkBackgroundRoundTrips();
+    void backgroundAllocationFailureCanRetry();
+    void bloomAllocationFailureCanRetry();
+    void outputTargetsReleaseIndependently();
+    void gpuResourcesFollowEglContext();
+    void failedGpuContextIsReleasedOnReplacement();
     void brightSourceProducesBloom_data();
     void brightSourceProducesBloom();
     void movingBloomMatchesFullRepaint_data();
     void movingBloomMatchesFullRepaint();
+    void hdrToSdrClearsDesktopBloomOutsideParticleSources();
+    void wideGamutSdrDesktopBloomMatchesFullRepaint_data();
+    void wideGamutSdrDesktopBloomMatchesFullRepaint();
     void outputColorMatchesGameWorkingSpace_data();
     void outputColorMatchesGameWorkingSpace();
     void patternedBackgroundRoundTrips_data();
@@ -296,6 +306,239 @@ void GpuTests::darkBackgroundRoundTrips()
     QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
 }
 
+void GpuTests::backgroundAllocationFailureCanRetry()
+{
+    const QSize size(128, 96);
+    auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
+    QVERIFY(texture);
+    GLFramebuffer fbo(texture.get());
+    QVERIFY(fbo.valid());
+    GLFramebuffer wrapper(fbo.handle(), size);
+    RenderTarget target(&wrapper, ColorDescription::sRGB);
+    const RenderViewport viewport(RectF(0, 0, size.width(), size.height()), 1.0, target, QPoint());
+    GLFramebuffer::pushFramebuffer(&wrapper);
+    const auto pop = qScopeGuard([] { GLFramebuffer::popFramebuffer(); });
+
+    GPURenderer renderer;
+    QVERIFY(renderer.initialize());
+    QVERIFY(renderer.prepareTargets(target, viewport));
+    const Region region(0, 0, size.width(), size.height());
+
+    // PBO 容量不足，纹理名称分配成功，但像素存储和 FBO 创建失败。
+    GLuint unpackBuffer = 0;
+    glGenBuffers(1, &unpackBuffer);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, 4, nullptr, GL_STREAM_DRAW);
+    const bool succeeded = renderer.beginFrame(target, viewport, region);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glDeleteBuffers(1, &unpackBuffer);
+    QVERIFY(!succeeded);
+    QCOMPARE(glGetError(), GLenum(GL_INVALID_OPERATION));
+    QVERIFY(renderer.diagnosticStatus().contains(QStringLiteral("bg=0x0")));
+
+    QVERIFY(renderer.beginFrame(target, viewport, region));
+    renderer.endFrame(target, viewport, region, renderer.updateBloom(target, region));
+    QVERIFY(renderer.diagnosticStatus().contains(QStringLiteral("bg=128x96")));
+    QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
+}
+
+void GpuTests::bloomAllocationFailureCanRetry()
+{
+    const QSize size(128, 96);
+    auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
+    QVERIFY(texture);
+    GLFramebuffer fbo(texture.get());
+    QVERIFY(fbo.valid());
+    GLFramebuffer::pushFramebuffer(&fbo);
+    const auto pop = qScopeGuard([] { GLFramebuffer::popFramebuffer(); });
+    const auto hdr = std::make_shared<ColorDescription>(Colorimetry::BT709,
+        TransferFunction(TransferFunction::gamma22, 0, 320), 80, 0, 320, 320);
+    RenderTarget sdrTarget(&fbo, ColorDescription::sRGB);
+    RenderTarget hdrTarget(&fbo, hdr);
+    const RectF rect(0, 0, size.width(), size.height());
+    const RenderViewport sdrView(rect, 1.0, sdrTarget, QPoint());
+    const RenderViewport hdrView(rect, 1.0, hdrTarget, QPoint());
+    const Region damage(0, 0, size.width(), size.height());
+    const GLfloat dark[]{.04f, .05f, .06f, 1};
+    const GLfloat bright[]{.75f, .75f, .75f, 1};
+
+    GPURenderer renderer;
+    QVERIFY(renderer.initialize());
+    QVERIFY(renderer.prepareTargets(sdrTarget, sdrView));
+    glClearBufferfv(GL_COLOR, 0, dark);
+    QVERIFY(renderer.beginFrame(sdrTarget, sdrView, damage));
+    const bool sdrBloom = renderer.updateBloom(sdrTarget, {});
+    renderer.endFrame(sdrTarget, sdrView, damage, sdrBloom);
+    QVERIFY(!sdrBloom);
+    QVERIFY(std::abs(readPixel(64, 48)[0] - dark[0]) < .001f);
+
+    // HDR 背景需要辉光。用容量不足的 PBO 只让这次金字塔分配失败。
+    glClearBufferfv(GL_COLOR, 0, bright);
+    QVERIFY(renderer.beginFrame(hdrTarget, hdrView, damage));
+    GLuint unpackBuffer = 0;
+    glGenBuffers(1, &unpackBuffer);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, 4, nullptr, GL_STREAM_DRAW);
+    const bool failedBloom = renderer.updateBloom(hdrTarget, {});
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glDeleteBuffers(1, &unpackBuffer);
+    renderer.endFrame(hdrTarget, hdrView, damage, failedBloom);
+    QVERIFY(!failedBloom);
+    QCOMPARE(glGetError(), GLenum(GL_INVALID_OPERATION));
+    QVERIFY(std::abs(readPixel(64, 48)[0] - bright[0]) < .001f);
+
+    const auto repaint = [&]() {
+        glClearBufferfv(GL_COLOR, 0, bright);
+        if (!renderer.beginFrame(hdrTarget, hdrView, damage)) {
+            return false;
+        }
+        const bool bloom = renderer.updateBloom(hdrTarget, {});
+        renderer.endFrame(hdrTarget, hdrView, damage, bloom);
+        return bloom;
+    };
+    QVERIFY(!repaint()); // 冷却期间仍复用场景目标。
+    QTRY_VERIFY_WITH_TIMEOUT(repaint(), 2000);
+    QVERIFY(readPixel(64, 48)[0] > bright[0] + .01f);
+    QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
+}
+
+void GpuTests::outputTargetsReleaseIndependently()
+{
+    struct TestOutput : BackendOutput {
+        std::expected<void, OutputError> testPresentation(const std::shared_ptr<OutputFrame> &) override
+        {
+            return {};
+        }
+        std::expected<void, OutputError> present(const QList<OutputLayer *> &,
+                                                  const std::shared_ptr<OutputFrame> &) override
+        {
+            return {};
+        }
+    };
+    TestOutput firstBackend;
+    TestOutput secondBackend;
+    const LogicalOutput first(&firstBackend);
+    const LogicalOutput second(&secondBackend);
+    GPURenderer renderer;
+    const auto prepare = [&renderer](const LogicalOutput &output, const QSize &size) {
+        GLFramebuffer framebuffer(0, size);
+        RenderTarget target(&framebuffer, ColorDescription::sRGB);
+        const RenderViewport viewport(RectF(0, 0, size.width(), size.height()), 1.0, target, QPoint());
+        return renderer.prepareTargets(target, viewport, &output);
+    };
+
+    QVERIFY(prepare(first, QSize(128, 96)));
+    QVERIFY(prepare(second, QSize(96, 64)));
+    QVERIFY(prepare(first, QSize(160, 100)));
+    const auto resized = renderer.diagnosticStatus();
+    QVERIFY(!resized.contains(QStringLiteral("hdr=128x96")));
+    QVERIFY(resized.contains(QStringLiteral("hdr=160x100")));
+    QVERIFY(resized.contains(QStringLiteral("hdr=96x64")));
+
+    QVERIFY(renderer.invalidateOutput(&second));
+    QVERIFY(!renderer.invalidateOutput(&second));
+    renderer.releaseInvalidatedTargets();
+    const auto removed = renderer.diagnosticStatus();
+    QVERIFY(!removed.contains(QStringLiteral("hdr=96x64")));
+    QVERIFY(removed.contains(QStringLiteral("hdr=160x100")));
+    QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
+}
+
+void GpuTests::gpuResourcesFollowEglContext()
+{
+    auto second = EglContext::create(m_display.get(), EGL_NO_CONFIG_KHR, nullptr);
+    QVERIFY(second);
+    const auto restore = qScopeGuard([&]() {
+        second.reset();
+        (void)m_context->makeCurrent();
+    });
+    QVERIFY(!second->isCompatibleWith(m_context.get()));
+    GpuRendererCache cache;
+    const auto paint = [](GPURenderer &renderer, const QSize &size) {
+        auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
+        QVERIFY(texture);
+        GLFramebuffer fbo(texture.get());
+        QVERIFY(fbo.valid());
+        RenderTarget target(&fbo, ColorDescription::sRGB);
+        const RenderViewport viewport(RectF(0, 0, size.width(), size.height()), 1.0, target, QPoint());
+        GLFramebuffer::pushFramebuffer(&fbo);
+        const auto pop = qScopeGuard([] { GLFramebuffer::popFramebuffer(); });
+        const GLfloat dark[]{.04f, .05f, .06f, 1};
+        glClearBufferfv(GL_COLOR, 0, dark);
+        const Region region(0, 0, size.width(), size.height());
+        QVERIFY(renderer.prepareTargets(target, viewport));
+        QVERIFY(renderer.beginFrame(target, viewport, region));
+        renderer.endFrame(target, viewport, region, renderer.updateBloom(target, {}));
+        QVERIFY(std::abs(readPixel(16, 16)[0] - dark[0]) < .001f);
+        QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
+    };
+
+    QVERIFY(m_context->makeCurrent());
+    auto *firstEntry = cache.current();
+    QVERIFY(firstEntry && firstEntry->ready);
+    paint(firstEntry->renderer, QSize(64, 64));
+    QVERIFY(second->makeCurrent());
+    auto *secondEntry = cache.current();
+    QVERIFY(secondEntry && secondEntry->ready);
+    QVERIFY(firstEntry != secondEntry);
+    paint(secondEntry->renderer, QSize(96, 64));
+    QVERIFY(firstEntry->renderer.diagnosticStatus().contains(QStringLiteral("hdr=64x64")));
+    QVERIFY(secondEntry->renderer.diagnosticStatus().contains(QStringLiteral("hdr=96x64")));
+
+    // 在第二个上下文触发失效，两个上下文的资源都应在各自的归属中释放。
+    cache.invalidateOutput(nullptr);
+    QCOMPARE(EglContext::currentContext(), second.get());
+    QVERIFY(!cache.diagnosticStatus().contains(QStringLiteral(":hdr=")));
+    paint(secondEntry->renderer, QSize(96, 64));
+    QVERIFY(m_context->makeCurrent());
+    QCOMPARE(cache.current(), firstEntry);
+    paint(firstEntry->renderer, QSize(64, 64));
+    cache.releaseDevice(nullptr);
+    QCOMPARE(EglContext::currentContext(), m_context.get());
+    QVERIFY(!cache.ready());
+    QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
+}
+
+void GpuTests::failedGpuContextIsReleasedOnReplacement()
+{
+    auto failed = EglContext::create(m_display.get(), EGL_NO_CONFIG_KHR, nullptr);
+    QVERIFY(failed);
+    QVERIFY(failed->makeCurrent());
+    const auto restore = qScopeGuard([this] { (void)m_context->makeCurrent(); });
+    GpuRendererCache cache;
+    auto *original = cache.current();
+    QVERIFY(original && original->ready);
+    failed->setFailed();
+    QVERIFY(!cache.current());
+    std::weak_ptr<EglContext> old = failed;
+    failed.reset();
+
+    QVERIFY(m_context->makeCurrent());
+    const QSize size(64, 64);
+    auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
+    QVERIFY(texture);
+    GLFramebuffer fbo(texture.get());
+    QVERIFY(fbo.valid());
+    GLFramebuffer::pushFramebuffer(&fbo);
+    const auto pop = qScopeGuard([] { GLFramebuffer::popFramebuffer(); });
+    auto *replacement = cache.current();
+    QVERIFY(replacement && replacement->ready);
+    QVERIFY(old.expired());
+    QCOMPARE(EglContext::currentContext(), m_context.get());
+    QCOMPARE(GLFramebuffer::currentFramebuffer(), &fbo);
+    RenderTarget target(&fbo, ColorDescription::sRGB);
+    const RenderViewport viewport(RectF(0, 0, size.width(), size.height()), 1.0, target, QPoint());
+    const Region region(0, 0, size.width(), size.height());
+    const GLfloat dark[]{.04f, .05f, .06f, 1};
+    glClearBufferfv(GL_COLOR, 0, dark);
+    auto &renderer = replacement->renderer;
+    QVERIFY(renderer.prepareTargets(target, viewport));
+    QVERIFY(renderer.beginFrame(target, viewport, region));
+    renderer.endFrame(target, viewport, region, renderer.updateBloom(target, {}));
+    QVERIFY(std::abs(readPixel(16, 16)[0] - dark[0]) < .001f);
+    QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
+}
+
 void GpuTests::brightSourceProducesBloom_data()
 {
     QTest::addColumn<bool>("beforeBloom");
@@ -370,16 +613,26 @@ void GpuTests::movingBloomMatchesFullRepaint()
         TransferFunction(TransferFunction::gamma22, 0, 80), 80, 0, 80, 80);
     // Reference redraws the whole scene. The second run preserves all pixels outside
     // damage, as KWin does. A moving/disappearing source must leave the same image.
-    const std::array<QRect, 5> sources{{QRect(size.width()/8, size.height()/6, 16, 16),
+    const std::array<QRect, 7> sources{{QRect(size.width()/8, size.height()/6, 16, 16),
         QRect(size.width()/8+15, size.height()/6+7, 16, 16),
         QRect(size.width()/2, size.height()/2, 16, 16),
-        QRect(size.width()-12, size.height()-12, 12, 12), QRect()}};
-    std::array<std::vector<float>, 5> reference;
+        QRect(size.width()-12, size.height()-12, 12, 12), {}, {}, {}}};
+    const std::array<QRect, sources.size()> postBloom{{{}, {},
+        QRect(size.width()/4, size.height()/4, 8, 8), {},
+        QRect(5, 5, 8, 8), QRect(size.width()/2, 5, 8, 8), {}}};
+    std::array<std::vector<float>, sources.size()> reference;
     const GLfloat background[]{.04f, .06f, .08f, 1};
     const GLfloat bright[]{4, 2, 1, 1};
+    const GLfloat triangle[]{.4f, .8f, 1.2f, 1};
     const int reach = int(std::ceil(baclickfx::bloomReachPx(size, 1.0))) + 2;
     const auto region = [](const QRect &rect) {
         return Region(Rect(rect.x(), rect.y(), rect.width(), rect.height()));
+    };
+    const auto clearRect = [&](const Rect &rect, const GLfloat *color) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(rect.x(), size.height() - rect.bottom(), rect.width(), rect.height());
+        glClearBufferfv(GL_COLOR, 0, color);
+        glDisable(GL_SCISSOR_TEST);
     };
     for (bool partial : {false, true}) {
         auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
@@ -394,25 +647,29 @@ void GpuTests::movingBloomMatchesFullRepaint()
             GPURenderer renderer;
             QVERIFY(renderer.initialize());
             QVERIFY(renderer.prepareTargets(target, viewport));
-            QRect previous;
+            Region previous;
             for (std::size_t frame = 0; frame < sources.size(); ++frame) {
                 const QRect source = sources[frame];
-                const QRect damage = partial
-                    ? source.united(previous).adjusted(-reach, -reach, reach, reach).intersected(output)
-                    : output;
-                glEnable(GL_SCISSOR_TEST);
-                glScissor(damage.x(), size.height()-damage.bottom()-1, damage.width(), damage.height());
-                glClearBufferfv(GL_COLOR, 0, background);
-                glDisable(GL_SCISSOR_TEST);
-                QVERIFY(renderer.beginFrame(target, viewport, region(damage)));
+                const QRect glow = source.isEmpty() ? QRect()
+                    : source.adjusted(-reach, -reach, reach, reach).intersected(output);
+                const QRect post = postBloom[frame];
+                const QRect postDamage = post.isEmpty() ? QRect()
+                    : post.adjusted(-1, -1, 1, 1).intersected(output);
+                const Region damage = partial ? region(glow).united(region(postDamage)) : region(output);
+                const Region repaint = damage.united(previous);
+                for (const Rect &rect : repaint.rects()) {
+                    clearRect(rect, background);
+                }
+                QVERIFY(renderer.beginFrame(target, viewport, repaint));
                 if (!source.isEmpty()) {
-                    glEnable(GL_SCISSOR_TEST);
-                    glScissor(source.x(), size.height()-source.bottom()-1, source.width(), source.height());
-                    glClearBufferfv(GL_COLOR, 0, bright);
-                    glDisable(GL_SCISSOR_TEST);
+                    clearRect(Rect(source.x(), source.y(), source.width(), source.height()), bright);
                 }
                 const Region bloomUpdate = region(partial ? source : output);
-                renderer.endFrame(target, viewport, region(damage), renderer.updateBloom(target, bloomUpdate));
+                const bool bloomOk = renderer.updateBloom(target, bloomUpdate);
+                if (!post.isEmpty()) {
+                    clearRect(Rect(post.x(), post.y(), post.width(), post.height()), triangle);
+                }
+                renderer.endFrame(target, viewport, damage, bloomOk);
                 std::vector<float> pixels(std::size_t(size.width()) * size.height() * 4);
                 glReadPixels(0, 0, size.width(), size.height(), GL_RGBA, GL_FLOAT, pixels.data());
                 if (!partial) {
@@ -429,8 +686,108 @@ void GpuTests::movingBloomMatchesFullRepaint()
                     QVERIFY2(maxError < .002f, qPrintable(QStringLiteral("frame=%1 maxError=%2 pixel=(%3,%4)")
                         .arg(frame).arg(maxError).arg((maxIndex/4)%size.width()).arg((maxIndex/4)/size.width())));
                 }
-                previous = source;
+                previous = damage;
             }
+        }
+    }
+    QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
+}
+
+void GpuTests::hdrToSdrClearsDesktopBloomOutsideParticleSources()
+{
+    const QSize size(128, 96);
+    auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
+    QVERIFY(texture);
+    GLFramebuffer fbo(texture.get());
+    QVERIFY(fbo.valid());
+    const auto hdr = std::make_shared<ColorDescription>(Colorimetry::BT709,
+        TransferFunction(TransferFunction::gamma22, 0, 320), 80, 0, 320, 320);
+    const auto sdr = std::make_shared<ColorDescription>(Colorimetry::BT709,
+        TransferFunction(TransferFunction::gamma22, 0, 80), 80, 0, 80, 80);
+    RenderTarget hdrTarget(&fbo, hdr);
+    RenderTarget sdrTarget(&fbo, sdr);
+    const RectF rect(0, 0, size.width(), size.height());
+    const RenderViewport hdrView(rect, 1.0, hdrTarget, QPoint());
+    const RenderViewport sdrView(rect, 1.0, sdrTarget, QPoint());
+    GLFramebuffer::pushFramebuffer(&fbo);
+    const auto pop = qScopeGuard([] { GLFramebuffer::popFramebuffer(); });
+    GPURenderer renderer;
+    QVERIFY(renderer.initialize());
+
+    // HDR 桌面本身是亮源，粒子亮源区域为空。
+    const Region output(0, 0, size.width(), size.height());
+    const GLfloat bright[]{.75f, .75f, .75f, 1};
+    glClearBufferfv(GL_COLOR, 0, bright);
+    QVERIFY(renderer.prepareTargets(hdrTarget, hdrView));
+    QVERIFY(renderer.beginFrame(hdrTarget, hdrView, output));
+    const bool hdrBloom = renderer.updateBloom(hdrTarget, {});
+    QVERIFY(hdrBloom);
+    renderer.endFrame(hdrTarget, hdrView, output, hdrBloom);
+    QVERIFY(readPixel(64, 48)[0] > bright[0] + .01f);
+
+    // 复用同尺寸目标。SDR 帧只合成一块小区域，且仍然没有 Bloom 前的粒子。
+    const GLfloat dark[]{.04f, .05f, .06f, 1};
+    glClearBufferfv(GL_COLOR, 0, dark);
+    const Region damage(60, 44, 8, 8);
+    QVERIFY(renderer.prepareTargets(sdrTarget, sdrView));
+    QVERIFY(renderer.beginFrame(sdrTarget, sdrView, damage));
+    const bool sdrBloom = renderer.updateBloom(sdrTarget, {});
+    QVERIFY(sdrBloom);
+    renderer.endFrame(sdrTarget, sdrView, damage, sdrBloom);
+    const auto pixel = readPixel(64, 48);
+    for (int channel = 0; channel < 3; ++channel) {
+        QVERIFY(std::abs(pixel[channel] - dark[channel]) < .001f);
+    }
+}
+
+void GpuTests::wideGamutSdrDesktopBloomMatchesFullRepaint_data()
+{
+    QTest::addColumn<bool>("p3");
+    QTest::newRow("P3") << true;
+    QTest::newRow("BT2020") << false;
+}
+
+void GpuTests::wideGamutSdrDesktopBloomMatchesFullRepaint()
+{
+    QFETCH(bool, p3);
+    const QSize size(128, 96);
+    auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
+    QVERIFY(texture);
+    GLFramebuffer fbo(texture.get());
+    QVERIFY(fbo.valid());
+    const auto color = std::make_shared<ColorDescription>(
+        p3 ? Colorimetry::DisplayP3 : Colorimetry::BT2020,
+        TransferFunction(TransferFunction::gamma22, 0, 80), 80, 0, 80, 80);
+    RenderTarget target(&fbo, color);
+    const RenderViewport viewport(RectF(0, 0, size.width(), size.height()), 1.0, target, QPoint());
+    const Region output(0, 0, size.width(), size.height());
+    const Region damage(64, 0, 8, size.height());
+    GLFramebuffer::pushFramebuffer(&fbo);
+    const auto pop = qScopeGuard([] { GLFramebuffer::popFramebuffer(); });
+    const GLfloat dark[]{.04f, .05f, .06f, 1};
+    const GLfloat red[]{1, 0, 0, 1};
+    std::vector<float> reference;
+    for (bool full : {true, false}) {
+        glClearBufferfv(GL_COLOR, 0, dark);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(0, 0, 64, size.height());
+        glClearBufferfv(GL_COLOR, 0, red);
+        glDisable(GL_SCISSOR_TEST);
+        GPURenderer renderer;
+        QVERIFY(renderer.initialize());
+        QVERIFY(renderer.prepareTargets(target, viewport));
+        QVERIFY(renderer.beginFrame(target, viewport, full ? output : damage));
+        // 亮源来自局部重绘区域以外的桌面，当前帧没有粒子亮源。
+        const bool bloom = renderer.updateBloom(target, full ? output : Region());
+        renderer.endFrame(target, viewport, full ? output : damage, bloom);
+        QVERIFY(bloom);
+        QVERIFY(readPixel(64, 48)[0] > dark[0] + .01f);
+        std::vector<float> pixels(std::size_t(8 * size.height() * 4));
+        glReadPixels(64, 0, 8, size.height(), GL_RGBA, GL_FLOAT, pixels.data());
+        if (full) {
+            reference = std::move(pixels);
+        } else {
+            QCOMPARE(pixels, reference);
         }
     }
     QCOMPARE(glGetError(), GLenum(GL_NO_ERROR));
@@ -440,23 +797,27 @@ void GpuTests::outputColorMatchesGameWorkingSpace_data()
 {
     QTest::addColumn<int>("gamut");
     QTest::addColumn<int>("transfer");
-    QTest::newRow("709-gamma22") << 0 << int(TransferFunction::gamma22);
-    QTest::newRow("P3-gamma22") << 1 << int(TransferFunction::gamma22);
-    QTest::newRow("2020-gamma22") << 2 << int(TransferFunction::gamma22);
-    QTest::newRow("2020-PQ") << 2 << int(TransferFunction::PerceptualQuantizer);
-    QTest::newRow("709-sRGB") << 0 << int(TransferFunction::sRGB);
-    QTest::newRow("709-linear") << 0 << int(TransferFunction::linear);
-    QTest::newRow("709-BT1886") << 0 << int(TransferFunction::BT1886);
+    QTest::addColumn<double>("peak");
+    QTest::newRow("709-gamma22") << 0 << int(TransferFunction::gamma22) << 80.0;
+    QTest::newRow("P3-gamma22") << 1 << int(TransferFunction::gamma22) << 80.0;
+    QTest::newRow("2020-gamma22") << 2 << int(TransferFunction::gamma22) << 80.0;
+    QTest::newRow("2020-PQ") << 2 << int(TransferFunction::PerceptualQuantizer) << 10000.0;
+    QTest::newRow("2020-HLG-1000") << 2 << int(TransferFunction::HLG) << 1000.0;
+    QTest::newRow("2020-HLG-600") << 2 << int(TransferFunction::HLG) << 600.0;
+    QTest::newRow("709-sRGB") << 0 << int(TransferFunction::sRGB) << 80.0;
+    QTest::newRow("709-linear") << 0 << int(TransferFunction::linear) << 80.0;
+    QTest::newRow("709-BT1886") << 0 << int(TransferFunction::BT1886) << 80.0;
 }
 
 void GpuTests::outputColorMatchesGameWorkingSpace()
 {
     QFETCH(int, gamut);
     QFETCH(int, transfer);
+    QFETCH(double, peak);
     const auto &primaries = gamut == 1 ? Colorimetry::DisplayP3
         : gamut == 2 ? Colorimetry::BT2020 : Colorimetry::BT709;
-    const TransferFunction tf(TransferFunction::Type(transfer), 0,
-        transfer == TransferFunction::PerceptualQuantizer ? 10000 : 80);
+    const bool hlg = transfer == TransferFunction::HLG;
+    const TransferFunction tf(TransferFunction::Type(transfer), hlg ? .05 : 0, peak);
     const auto cd = std::make_shared<ColorDescription>(primaries, tf, 80, 0, 80, tf.maxLuminance);
     const QSize size(32, 32);
     auto texture = baclickfx::allocateTexture(GL_RGBA16F, size);
@@ -476,6 +837,14 @@ void GpuTests::outputColorMatchesGameWorkingSpace()
         QVERIFY(renderer.prepareTargets(target, viewport));
         const Region output(0, 0, 32, 32);
         QVERIFY(renderer.beginFrame(target, viewport, output));
+        if (hlg) {
+            const auto decoded = readPixel(1, 1);
+            const auto expected = primaries.relativeColorimetricTo(Colorimetry::BT709)
+                .map(tf.encodedToNits(QVector3D(before[0], before[1], before[2])) / 80.f);
+            for (int ch = 0; ch < 3; ++ch) {
+                QVERIFY(std::abs(decoded[ch] - expected[ch]) < .001f);
+            }
+        }
         glEnable(GL_SCISSOR_TEST);
         glScissor(8, 8, 16, 16);
         // Source color is in the original game's linear BT.709 working space.

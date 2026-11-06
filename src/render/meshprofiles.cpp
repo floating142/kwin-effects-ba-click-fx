@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "meshprofiles.h"
-#include "curveutils.h"
+#include "particles/curveutils.h"
 
 #include <algorithm>
 #include <cmath>

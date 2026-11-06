@@ -7,6 +7,7 @@
 uniform int u_tfType;
 uniform vec3 u_tfLum;    // 最小亮度、最大亮度和参考白亮度，单位为尼特。
 uniform vec2 u_tfBt1886; // BT.1886 的 a 和 b。
+uniform vec3 u_tfHlg;    // HLG 的 gamma、alpha 和黑电平 beta。
 // 导入时为输出色域 → 线性 BT.709，合成时为逆向。矩阵不包含亮度归一化。
 uniform mat4 u_colorMatrix;
 
@@ -61,6 +62,19 @@ float tfInverseEotf(float nits)
 
 vec3 tfDecode(vec3 e)
 {
+    if (u_tfType == 5) {
+        // BT.2100 HLG：反 OETF 后，以 BT.2020 亮度对三个通道共同应用 OOTF。
+        vec3 adjusted = max(vec3(0.0), (1.0 - u_tfHlg.z) * e + u_tfHlg.z);
+        vec3 lo = adjusted * adjusted / 3.0;
+        vec3 hi = (exp((adjusted - 0.55991073) / 0.17883277) + 0.28466892) / 12.0;
+        vec3 nits = u_tfLum.y * mix(hi, lo, lessThanEqual(adjusted, vec3(0.5)));
+        float y = dot(vec3(0.2627, 0.6780, 0.0593), nits);
+        if (y <= 0.0) {
+            return vec3(0.0);
+        }
+        return nits * (u_tfHlg.y * pow(y, u_tfHlg.x - 1.0) / max(u_tfLum.z, 1e-6));
+    }
+
     // 将绝对亮度归一化到 Unity 使用的相对线性范围。
     return vec3(tfEotf(e.r), tfEotf(e.g), tfEotf(e.b)) / max(u_tfLum.z, 1e-6);
 }
@@ -69,5 +83,14 @@ vec3 tfEncode(vec3 relative)
 {
     // 恢复绝对亮度后按当前输出的传递函数编码。
     vec3 n = relative * u_tfLum.z;
+    if (u_tfType == 5) {
+        float y = dot(vec3(0.2627, 0.6780, 0.0593), n);
+        float inverseOotf = pow(max(y / u_tfHlg.y, 0.0001), 1.0 / u_tfHlg.x - 1.0);
+        vec3 scene = clamp(n * (inverseOotf / (u_tfHlg.y * u_tfLum.y)), 0.0, 1.0);
+        vec3 lo = sqrt(3.0 * scene);
+        vec3 hi = 0.17883277 * log(max(12.0 * scene - 0.28466892, vec3(1e-6))) + 0.55991073;
+        vec3 encoded = mix(hi, lo, lessThanEqual(scene, vec3(1.0 / 12.0)));
+        return (encoded - u_tfHlg.z) / (1.0 - u_tfHlg.z);
+    }
     return vec3(tfInverseEotf(n.r), tfInverseEotf(n.g), tfInverseEotf(n.b));
 }

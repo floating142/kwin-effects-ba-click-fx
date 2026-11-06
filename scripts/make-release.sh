@@ -19,11 +19,10 @@ checksums="${out_dir}/${name}-SHA256SUMS.txt"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "${work_dir}"' EXIT
 
-# 只将构建、安装及用户说明所需的文件放入源码包；
-# CI、测试、发布脚本和商店素材不属于源码安装包。
+# 源码包包含完整文档和它所引用的本地测试及维护工具。
 archive_paths=(
-  CMakeLists.txt LICENSE README.md README.en.md TESTING.md TODO.md
-  src config
+  CMakeLists.txt LICENSE README.md README.en.md
+  src config docs scripts tests
   assets shader po
   install-local.sh uninstall-local.sh test-nested.sh
   preview/logo.gif
@@ -32,15 +31,12 @@ archive_paths=(
 in_git_worktree=0
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   in_git_worktree=1
-  if ! git diff --quiet || ! git diff --cached --quiet; then
+  if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
     echo "请先提交当前修改再生成发布包 / Commit the current changes before creating a release archive" >&2
     exit 1
   fi
 fi
 
-"${root_dir}/scripts/verify-release.sh"
-
-mkdir -p "${out_dir}"
 if [[ "${in_git_worktree}" -eq 1 ]]; then
   git archive --format=tar --prefix="${name}/" HEAD -- "${archive_paths[@]}" \
     | tar -xf - -C "${work_dir}"
@@ -52,6 +48,10 @@ else
   cp -a --parents "${archive_paths[@]}" "${work_dir}/${name}"
   source_date_epoch="${SOURCE_DATE_EPOCH:-$(date +%s)}"
 fi
+
+# 验证归档输入，构建目录放在源码树之外。
+"${work_dir}/${name}/scripts/verify-release.sh" "${work_dir}/build"
+mkdir -p "${out_dir}"
 
 tar --sort=name \
   --mtime="@${source_date_epoch}" \

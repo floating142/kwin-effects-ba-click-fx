@@ -25,11 +25,7 @@ KWin native effects are ABI-bound to the exact KWin version. Rebuild the effect 
 
 ## Installation
 
-Download the source archive from GitHub Releases, for example:
-
-```text
-kwin-effects-ba-click-fx-1.0.0.tar.xz
-```
+Download the source archive from the project’s GitHub Releases.
 
 This project is intended to be installed from the source archive. It does not provide universal prebuilt binaries.
 Extract the archive and run from the source directory:
@@ -43,7 +39,7 @@ When installing to `/usr`, it requests administrator access only during the inst
 
 Then open:
 
-**System Settings → Window Management → Desktop Effects**
+**System Settings → Appearance & Style → Desktop Effects**
 
 Search for **BA Click FX** and enable it. After a first installation or a KWin upgrade, log out and back in if the effect is not listed.
 

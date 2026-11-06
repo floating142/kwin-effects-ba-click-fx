@@ -21,7 +21,10 @@ file(GLOB_RECURSE BA_CLICK_FX_BUILD_ID_FILES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/config/*.cpp"
     "${CMAKE_SOURCE_DIR}/config/*.h"
     "${CMAKE_SOURCE_DIR}/config/*.ui"
+    "${CMAKE_SOURCE_DIR}/src/metadata.json"
+    "${CMAKE_SOURCE_DIR}/po/*.po"
 )
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${BA_CLICK_FX_BUILD_ID_FILES})
 set(BA_CLICK_FX_BUILD_ID_MATERIAL "")
 foreach(path IN LISTS BA_CLICK_FX_BUILD_ID_FILES)
     file(SHA256 "${path}" file_hash)

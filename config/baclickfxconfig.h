@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "applicationfilter.h"
+#include "input/applicationfilter.h"
 
 #include <KCModule>
 #include <QHash>
@@ -15,6 +15,7 @@
 #include "ui_baclickfxconfig.h"
 
 class QDBusPendingCallWatcher;
+class QJsonObject;
 
 /// 读写 BA Click FX 配置并通知 KWin 重新加载参数。
 class BaClickFxEffectConfig : public KCModule
@@ -36,6 +37,7 @@ private:
     void sendPreview();
     void dispatchPreview();
     void restorePersistedPreview();
+    QJsonObject editedOutputScaleOverrides() const;
     int selectedTriggerButtons() const;
     void setTriggerButtons(int buttons);
     void updateGlobalScaleVisibility();
@@ -46,7 +48,6 @@ private:
     void removeSelectedExcludedApplications();
     QHash<QString, class QSlider *> m_outputSliders;
     QHash<QString, class QLabel *> m_outputLabels;
-    QHash<QString, class QLabel *> m_outputNames;
     QHash<QString, class QToolButton *> m_outputResetButtons;
     QPointer<QWidget> m_outputScaleContainer;
     QSet<QString> m_outputOverrides;
@@ -54,8 +55,8 @@ private:
     QHash<QString, QString> m_outputIds;
     QHash<QString, QSize> m_outputNativeSizes;
     QTimer m_outputRefreshDebounce;
+    bool m_outputRefreshPending = false;
     QTimer m_previewDebounce;
-    QTimer m_outputRefreshTimeout;
     QPointer<QDBusPendingCallWatcher> m_outputRefreshWatcher;
     QPointer<QDBusPendingCallWatcher> m_windowPickerWatcher;
     QVector<baclickfx::ExcludedApplication> m_excludedApplications;

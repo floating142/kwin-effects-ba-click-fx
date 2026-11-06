@@ -3,15 +3,17 @@
 #include "gpurenderer.h"
 #include "gputexture.h"
 #include "baclickfxdefaults.h"
-#include "clickinstance.h"
-#include "curveutils.h"
+#include "particles/clickinstance.h"
+#include "particles/curveutils.h"
 #include "meshprofiles.h"
-#include "subsystems.h"
-#include "trailstream.h"
+#include "particles/subsystems.h"
+#include "particles/trailstream.h"
 #include "bloomutils.h"
 
+#include <core/output.h>
 #include <core/rendertarget.h>
 #include <core/renderviewport.h>
+#include <opengl/eglcontext.h>
 #include <opengl/glplatform.h>
 #include <opengl/glshadermanager.h>
 
@@ -54,6 +56,15 @@ const float kBloomIntensity = std::exp2(1.7f / 10.f) - 1.f;
 constexpr float kBloomClampMax = 3.9385e10f;
 // Color 为白色，但仍显式参与辉光染色公式。
 constexpr float kBloomColor[3] = {1.0f, 1.0f, 1.0f};
+constexpr auto kBloomRetryDelay = std::chrono::seconds(1);
+
+void clearColorAttachment(GLFramebuffer *fbo)
+{
+    static constexpr GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    GLFramebuffer::pushFramebuffer(fbo);
+    glClearBufferfv(GL_COLOR, 0, clearColor);
+    GLFramebuffer::popFramebuffer();
+}
 
 // 效果层 Region 使用全局逻辑坐标，离屏纹理使用左上角为原点的纹理像素坐标。
 // 区域映射统一向外取整，避免裁掉辉光采样核的有效贡献。
@@ -247,7 +258,10 @@ GPURenderer::GPURenderer() = default;
 
 GPURenderer::~GPURenderer()
 {
-    // KWin 在有效 OpenGL 上下文中卸载效果，可在此直接释放自有 OpenGL 对象。
+    // 上下文丢失时 KWin 的包装对象也会跳过 GL 删除，资源由 EGL 回收。
+    if (!EglContext::currentContext()) {
+        return;
+    }
     const auto deleteVertexArray = [](ShaderSet &set) {
         if (set.vao) {
             glDeleteVertexArrays(1, &set.vao);
@@ -490,8 +504,35 @@ std::unique_ptr<GLTexture> GPURenderer::loadTexture(const char *assetName, GLenu
     return tex;
 }
 
-bool GPURenderer::prepareTargets(const RenderTarget &renderTarget, const RenderViewport &viewport)
+bool GPURenderer::invalidateOutput(const LogicalOutput *output)
 {
+    for (const auto &targets : m_outputs) {
+        if (targets->output == output && !targets->invalidated) {
+            targets->invalidated = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+void GPURenderer::releaseInvalidatedTargets()
+{
+    std::erase_if(m_outputs, [this](const auto &targets) {
+        if (!targets->invalidated) {
+            return false;
+        }
+        if (m_current == targets.get()) {
+            m_current = nullptr;
+        }
+        return true;
+    });
+}
+
+bool GPURenderer::prepareTargets(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                                 const LogicalOutput *output)
+{
+    m_current = nullptr;
+    releaseInvalidatedTargets();
     // 显式按分量转换 KWin::RectF，后续几何计算统一使用 QRectF 的边界语义。
     const RectF rr = viewport.renderRect();
     const QRectF outputRect(rr.x(), rr.y(), rr.width(), rr.height());
@@ -508,31 +549,24 @@ bool GPURenderer::prepareTargets(const RenderTarget &renderTarget, const RenderV
         return false;
     }
 
-    // 输出数量有限，线性查找可避免额外缓存结构。
-    for (auto it = m_outputs.begin(); it != m_outputs.end(); ++it) {
-        const auto &t = *it;
+    // 同一输出切换视口时先释放旧资源，避免新旧全尺寸纹理同时占用显存。
+    const auto cached = std::find_if(m_outputs.begin(), m_outputs.end(), [output](const auto &targets) {
+        return targets->output == output;
+    });
+    if (cached != m_outputs.end()) {
+        const auto &t = *cached;
         if (t->renderRect == outputRect && qFuzzyCompare(t->scale, scale)
             && t->devicePx == devicePx
             && t->renderTargetDevicePx == renderTargetDevicePx
             && t->transformKind == transformKind) {
             m_current = t.get();
-            // 队尾为最近使用项。unique_ptr 移动不改变 OutputTargets 的对象地址。
-            if (std::next(it) != m_outputs.end()) {
-                auto hit = std::move(*it);
-                m_outputs.erase(it);
-                m_outputs.push_back(std::move(hit));
-            }
             return true;
         }
-    }
-
-    // 限制逐输出缓存数量，避免分辨率或缩放反复变化时保留过多陈旧资源。
-    constexpr std::size_t kMaxCachedOutputs = 4;
-    if (m_outputs.size() >= kMaxCachedOutputs) {
-        m_outputs.erase(m_outputs.begin());
+        m_outputs.erase(cached);
     }
 
     auto targets = std::make_unique<OutputTargets>();
+    targets->output = output;
     targets->renderRect = outputRect;
     targets->textureRect = QRectF(sr.x() / scale, sr.y() / scale,
                                   sr.width() / scale, sr.height() / scale);
@@ -556,11 +590,6 @@ bool GPURenderer::prepareTargets(const RenderTarget &renderTarget, const RenderV
         return false;
     }
 
-    // 辉光金字塔分配失败时仅关闭辉光，保留粒子渲染。
-    if (!prepareBloomPyramid(*targets, devicePx)) {
-        targets->bloomLevels.clear();
-    }
-
     // OpenGL 新分配纹理的内容未定义，而局部重绘和辉光采样可能读取尚未写入的边缘。
     // 创建资源时完整清零一次，避免未初始化显存进入辉光链。glClearBufferfv 不改变
     // 清除颜色或颜色掩码；临时关闭裁剪以覆盖整个附件。
@@ -568,28 +597,14 @@ bool GPURenderer::prepareTargets(const RenderTarget &renderTarget, const RenderV
     if (scissorWasEnabled) {
         glDisable(GL_SCISSOR_TEST);
     }
-    static constexpr GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    const auto clearFbo = [](GLFramebuffer *fbo) {
-        GLFramebuffer::pushFramebuffer(fbo);
-        glClearBufferfv(GL_COLOR, 0, clearColor);
-        GLFramebuffer::popFramebuffer();
-    };
-    clearFbo(targets->hdrFbo.get());
-    if (targets->bgFbo) {
-        clearFbo(targets->bgFbo.get());
-    }
-    for (BloomLevel &level : targets->bloomLevels) {
-        clearFbo(level.downFbo.get());
-        clearFbo(level.upFbo.get());
-    }
+    clearColorAttachment(targets->hdrFbo.get());
     if (scissorWasEnabled) {
         glEnable(GL_SCISSOR_TEST);
     }
 
     if (m_logVerbose) {
         qCInfo(KWIN_BA_CLICK_FX_RENDERER)
-            << "event=targets_created size=" << devicePx << " scale=" << scale
-            << " bloom_levels=" << targets->bloomLevels.size();
+            << "event=targets_created size=" << devicePx << " scale=" << scale;
     }
 
     m_outputs.push_back(std::move(targets));
@@ -602,14 +617,13 @@ double GPURenderer::bloomReachPx(const QSize &devicePx, double scale)
     return baclickfx::bloomReachPx(devicePx, scale);
 }
 
-bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devicePx)
+bool GPURenderer::prepareBloomPyramid(OutputTargets &targets)
 {
-    targets.bloomLevels.clear();
-
     // 级数和上采样尺度由第 0 级尺寸及 Diffusion 按 PPv2 公式确定。
-    QSize s = baclickfx::bloomBaseSize(devicePx);
+    QSize s = baclickfx::bloomBaseSize(targets.devicePx);
     const baclickfx::BloomPyramidParams params = baclickfx::bloomPyramidParams(s);
-    targets.bloomSampleScale = params.sampleScale;
+    std::vector<BloomLevel> levels;
+    levels.reserve(params.iterations);
 
     // Unity 即使短边降到 1 也保留 Diffusion 指定的层数。
     for (int i = 0; i < params.iterations; i++) {
@@ -644,12 +658,19 @@ bool GPURenderer::prepareBloomPyramid(OutputTargets &targets, const QSize &devic
             return false;
         }
 
-        targets.bloomLevels.push_back(std::move(level));
+        levels.push_back(std::move(level));
         s = QSize(s.width() >= 4 ? s.width() / 2 : 1,
                   s.height() >= 4 ? s.height() / 2 : 1);
     }
 
-    return !targets.bloomLevels.empty();
+    // beginFrame() 已关闭裁剪。清零未覆盖的像素，保证首次局部更新可安全采样。
+    for (const BloomLevel &level : levels) {
+        clearColorAttachment(level.downFbo.get());
+        clearColorAttachment(level.upFbo.get());
+    }
+    targets.bloomSampleScale = params.sampleScale;
+    targets.bloomLevels = std::move(levels);
+    return true;
 }
 
 void GPURenderer::setProfiling(bool on)
@@ -709,6 +730,7 @@ void GPURenderer::collectGpuTimings()
             m_lastGpuMs = m_lastGpuImportMs + m_lastGpuParticleMs
                 + m_lastGpuBloomMs + m_lastGpuCompositeMs;
             m_lastGpuOutput = frame.output;
+            m_lastGpuOutputId = frame.outputId;
             m_gpuSampleSerial++;
         }
 
@@ -720,7 +742,7 @@ void GPURenderer::collectGpuTimings()
 
 void GPURenderer::beginGpuTimingFrame()
 {
-    if (!m_profiling) {
+    if (!m_profiling || !EglContext::currentContext()->supportsTimerQueries()) {
         return;
     }
 
@@ -751,6 +773,7 @@ void GPURenderer::beginGpuTimingFrame()
         .arg(m_current->devicePx.width())
         .arg(m_current->devicePx.height())
         .arg(m_current->scale, 0, 'f', 2);
+    frame.outputId = statsOutputId(m_current->output, m_current->renderRect.topLeft());
     m_activeTimerFrame = slot;
     m_activeTimerPhase = -1;
     m_nextTimerFrame = (slot + 1) % kGpuTimerFrameCount;
@@ -811,6 +834,13 @@ void GPURenderer::setColorSpaceUniforms(GLShader *shader, const RenderTarget &re
                                  float(cd.referenceLuminance())));
     // BT.1886 参数始终初始化；其他传递函数不会执行对应分支。
     shader->setUniform("u_tfBt1886", QVector2D(float(tf.bt1886A()), float(tf.bt1886B())));
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+    if (tf.type == TransferFunction::HLG) {
+        const double gamma = 1.2 + 0.42 * std::log10(tf.maxLuminance / 1000.0);
+        const double alpha = std::pow(tf.maxLuminance, 1.0 - gamma);
+        shader->setUniform("u_tfHlg", QVector3D(float(gamma), float(alpha), float(tf.hlgBeta())));
+    }
+#endif
     QMatrix4x4 colorMatrix; // BT.709 输出保持严格单位矩阵。
     if (cd.containerColorimetry() != Colorimetry::BT709) {
         colorMatrix = toWorkingSpace
@@ -818,6 +848,63 @@ void GPURenderer::setColorSpaceUniforms(GLShader *shader, const RenderTarget &re
             : Colorimetry::BT709.relativeColorimetricTo(cd.containerColorimetry());
     }
     shader->setUniform("u_colorMatrix", colorMatrix);
+}
+
+QString GPURenderer::statsOutputId(const LogicalOutput *output, const QPointF &viewportOrigin)
+{
+    if (output) {
+        const auto uuid = output->uuid();
+        return uuid.isEmpty() ? output->name() : uuid;
+    }
+    return QStringLiteral("viewport@%1,%2").arg(viewportOrigin.x()).arg(viewportOrigin.y());
+}
+
+bool GPURenderer::desktopCanContributeBloom(const ColorDescription &color)
+{
+    // 饱和广色域颜色转换到线性 BT.709 时，分量可能超过参考白，即使输出是 SDR。
+    return color.containerColorimetry() != Colorimetry::BT709
+        || color.transferFunction().maxLuminance > color.referenceLuminance() * 1.0001;
+}
+
+bool GPURenderer::needsFullBloomRefresh(const ColorDescription &color) const
+{
+    if (desktopCanContributeBloom(color)) {
+        return true;
+    }
+    const auto &previous = m_current->previousBloomColor;
+    if (!previous || previous.get() == &color) {
+        return false;
+    }
+    const auto &tf = color.transferFunction();
+    const auto &oldTf = previous->transferFunction();
+    return oldTf.type != tf.type || oldTf.minLuminance != tf.minLuminance
+        || oldTf.maxLuminance != tf.maxLuminance
+        || previous->referenceLuminance() != color.referenceLuminance()
+        || previous->containerColorimetry() != color.containerColorimetry();
+}
+
+bool GPURenderer::prepareBackgroundTargets()
+{
+    if (m_current->bgFbo) {
+        return true;
+    }
+
+    auto texture = baclickfx::allocateTexture(GL_RGBA16F, m_current->devicePx);
+    if (!texture || texture->isNull()) {
+        GPU_ERROR() << "code=background_texture_alloc_failed" << m_current->devicePx;
+        return false;
+    }
+    texture->setFilter(GL_LINEAR);
+    texture->setWrapMode(GL_CLAMP_TO_EDGE);
+    auto fbo = std::make_unique<GLFramebuffer>(texture.get());
+    if (!fbo->valid()) {
+        GPU_ERROR() << "code=background_fbo_failed";
+        return false;
+    }
+
+    m_current->bgTexture = std::move(texture);
+    m_current->bgFbo = std::move(fbo);
+    return true;
 }
 
 bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewport &viewport,
@@ -882,12 +969,10 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
     // 传递函数解码。
     const QRectF &outRect = m_current->renderRect;
 
-    // SDR 桌面像素不会有效超过辉光阈值，可仅导入调用方请求的区域。HDR 输出允许
-    // 桌面高光超过参考白，辉光预筛选会读取这些像素，因此必须导入完整输出。
-    const ColorDescription &cd = *renderTarget.colorDescription();
-    const bool hasHdrHeadroom =
-        cd.transferFunction().maxLuminance > cd.referenceLuminance() * 1.0001;
-    Region importRegion = hasHdrHeadroom
+    // 普通 BT.709 SDR 可仅导入调用方请求的区域。HDR 或广色域桌面可能贡献辉光，
+    // 辉光预筛选需要完整输出。
+    // 色彩切换后的首帧同样需要完整输入，以重算该输出的辉光。
+    Region importRegion = needsFullBloomRefresh(*renderTarget.colorDescription())
         ? Region(alignedLogicalRect(outRect))
         : requestedImportRegion.intersected(alignedLogicalRect(outRect));
 
@@ -902,25 +987,11 @@ bool GPURenderer::beginFrame(const RenderTarget &renderTarget, const RenderViewp
         && sourceTexture->target() == GL_TEXTURE_2D && !sourceTexture->size().isEmpty();
     m_lastImportDirect = directImport;
 
-    if (!directImport && !m_current->bgTexture) {
-        m_current->bgTexture = baclickfx::allocateTexture(GL_RGBA16F, m_current->devicePx);
-        if (!m_current->bgTexture || m_current->bgTexture->isNull()) {
-            GPU_ERROR() << "code=background_texture_alloc_failed" << m_current->devicePx;
-            finishGpuTimingFrame(false);
-            restoreVertexState();
-            restoreBlendState();
-            return false;
-        }
-        m_current->bgTexture->setFilter(GL_LINEAR);
-        m_current->bgTexture->setWrapMode(GL_CLAMP_TO_EDGE);
-        m_current->bgFbo = std::make_unique<GLFramebuffer>(m_current->bgTexture.get());
-        if (!m_current->bgFbo->valid()) {
-            GPU_ERROR() << "code=background_fbo_failed";
-            finishGpuTimingFrame(false);
-            restoreVertexState();
-            restoreBlendState();
-            return false;
-        }
+    if (!directImport && !prepareBackgroundTargets()) {
+        finishGpuTimingFrame(false);
+        restoreVertexState();
+        restoreBlendState();
+        return false;
     }
 
     const OutputPixelGrid pixelGrid(viewport, m_current->devicePx);
@@ -1173,15 +1244,20 @@ void GPURenderer::renderTrail(const std::vector<StrokeData> &strokes,
             const auto &v = ribbon[index];
             const auto &sample = stroke.samples[stroke.samples.size() - 1 - v.sample];
             return ParticleVertex{
-                float(origin.x() + double(v.position[0]) * params.worldUnitPx),
-                float(origin.y() - double(v.position[1]) * params.worldUnitPx), v.u, v.v,
+                float(origin.x() + double(v.position[0]) * stroke.worldUnitPx),
+                float(origin.y() - double(v.position[1]) * stroke.worldUnitPx), v.u, v.v,
                 float(sample.color[0] * hdrGain), float(sample.color[1] * hdrGain),
                 float(sample.color[2] * hdrGain), float(sample.alpha)};
         };
+        ParticleVertex first = vertex(0);
+        ParticleVertex second = vertex(1);
         for (std::size_t i = 2; i < ribbon.size(); ++i) {
-            vertices.push_back(vertex(i - 2));
-            vertices.push_back(vertex(i % 2 ? i : i - 1));
-            vertices.push_back(vertex(i % 2 ? i - 1 : i));
+            const ParticleVertex third = vertex(i);
+            vertices.push_back(first);
+            vertices.push_back(i % 2 ? third : second);
+            vertices.push_back(i % 2 ? second : third);
+            first = second;
+            second = third;
         }
         appendVertices(vertices);
     }
@@ -1243,6 +1319,9 @@ bool GPURenderer::renderBloom(const Region &globalChangedRegion)
     if (!m_current || m_current->bloomLevels.empty() || !m_shaderBloomPrefilter
         || !m_shaderBloomDownsample || !m_shaderBloomUpsample) {
         return false;
+    }
+    if (globalChangedRegion.isEmpty()) {
+        return true;
     }
 
     std::vector<BloomLevel> &levels = m_current->bloomLevels;
@@ -1400,15 +1479,20 @@ bool GPURenderer::updateBloom(const RenderTarget &renderTarget, const Region &re
     const Region currentBloomSource = requestedBloomSourceRegion.intersected(outputLogical);
     Region bloomUpdateRegion = currentBloomSource;
     bloomUpdateRegion += m_current->previousBloomSourceRegion.intersected(outputLogical);
-    const ColorDescription &cd = *renderTarget.colorDescription();
-    const bool hasHdrHeadroom =
-        cd.transferFunction().maxLuminance > cd.referenceLuminance() * 1.0001;
-    if (hasHdrHeadroom) {
-        // HDR 桌面本身可超过辉光阈值，因此金字塔需与背景导入一样更新完整输出。
+    if (needsFullBloomRefresh(*renderTarget.colorDescription())) {
+        // 色彩切换时重算整屏，清除局部亮源区域之外的旧辉光。
         bloomUpdateRegion = Region(outputLogical);
     }
     beginGpuTimerPhase(GpuTimerPhase::Bloom);
+    if (m_current->bloomLevels.empty() && !bloomUpdateRegion.isEmpty()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= m_current->bloomRetryAt && !prepareBloomPyramid(*m_current)) {
+            // 保留本帧的粒子输出，活动期间最多每秒重试一次。
+            m_current->bloomRetryAt = now + kBloomRetryDelay;
+        }
+    }
     const bool bloomOk = renderBloom(bloomUpdateRegion);
+    m_current->previousBloomColor = renderTarget.colorDescription();
     m_current->previousBloomSourceRegion = currentBloomSource;
     switchGpuTimerPhase(GpuTimerPhase::Composite);
     return bloomOk;
@@ -1670,12 +1754,12 @@ void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmi
         const double curve = baclickfx::subSizeCurve(sub.params, progress);
         const baclickfx::Rgba col = baclickfx::subColor(sub.params, progress);
 
-        const QPointF offset = triParticleOffset(item, sub.params);
+        const QPointF offset = triParticleOffset(item);
         const double x = cx + offset.x();
         const double y = cy + offset.y();
 
         const double half = baclickfx::billboardHalfSize(sub.params, item.startSize,
-            float(curve), item.percentAge);
+            float(curve), item.percentAge, item.billboard);
         // PS17/PS18 的起始旋转为 0 且未启用 RotationModule，朝向仅由图集帧决定。
         const double rot = item.orientBase + item.spin * progress;
 
@@ -1733,6 +1817,149 @@ void GPURenderer::renderTriBurstGeometry(double cx, double cy, const TriBurstEmi
         glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE,
                             GL_ONE_MINUS_SRC_ALPHA);
     }
+}
+
+namespace
+{
+class RestoreEglContext
+{
+public:
+    ~RestoreEglContext()
+    {
+        auto *current = EglContext::currentContext();
+        if (current == m_previous) {
+            return;
+        }
+        if (m_previous) {
+            (void)m_previous->makeCurrent();
+        } else if (current) {
+            current->doneCurrent();
+        }
+    }
+
+private:
+    EglContext *const m_previous = EglContext::currentContext();
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+    // 待释放的缓存也可能持有进入清理前最后一份上下文引用。
+    const std::shared_ptr<EglContext> m_keepAlive = m_previous
+        ? m_previous->weak_from_this().lock() : nullptr;
+#endif
+};
+} // namespace
+
+GpuRendererCache::~GpuRendererCache()
+{
+    releaseDevice(nullptr);
+}
+
+GpuRendererCache::Entry *GpuRendererCache::current(const RenderDevice *device)
+{
+    auto *context = EglContext::currentContext();
+    if (!context) {
+        return nullptr;
+    }
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+    if (context->isFailed()) {
+        return nullptr;
+    }
+#endif
+    for (const auto &entry : m_entries) {
+        if (entry->context == context) {
+            return entry.get();
+        }
+    }
+
+    auto entry = std::make_unique<Entry>();
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+    entry->contextRef = context->weak_from_this().lock();
+    if (!entry->contextRef) {
+        return nullptr;
+    }
+    // KWin 可以在设备保留的情况下重建 EGL 上下文。回收旧资源后继续在新上下文绘制。
+    releaseEntries(nullptr, true);
+    if (EglContext::currentContext() != context) {
+        return nullptr;
+    }
+#else
+    // 旧版沿用合成器持有的单个上下文，生命周期覆盖效果实例。
+    if (!m_entries.empty()) {
+        return nullptr;
+    }
+#endif
+    entry->context = context;
+    entry->device = device;
+    entry->renderer.setLogLevel(m_logLevel);
+    entry->renderer.setProfiling(m_profiling);
+    entry->ready = entry->renderer.initialize();
+    if (!entry->ready) {
+        qCWarning(KWIN_BA_CLICK_FX_RENDERER)
+            << "event=error component=effect code=gpu_renderer_init_failed"
+            << "action=rendering_disabled_for_context";
+    }
+    return m_entries.emplace_back(std::move(entry)).get();
+}
+
+void GpuRendererCache::configure(baclickfx::defaults::LogLevel level, bool profiling)
+{
+    m_logLevel = level;
+    m_profiling = profiling;
+    for (const auto &entry : m_entries) {
+        entry->renderer.setLogLevel(level);
+        entry->renderer.setProfiling(profiling);
+        entry->lastGpuSampleSerial = entry->renderer.gpuSampleSerial();
+    }
+}
+
+void GpuRendererCache::invalidateOutput(const LogicalOutput *output)
+{
+    const RestoreEglContext restore;
+    for (const auto &entry : m_entries) {
+        if (entry->renderer.invalidateOutput(output)
+            && (entry->context == EglContext::currentContext() || entry->context->makeCurrent())) {
+            entry->renderer.releaseInvalidatedTargets();
+        }
+    }
+}
+
+void GpuRendererCache::releaseDevice(const RenderDevice *device)
+{
+    releaseEntries(device, false);
+}
+
+void GpuRendererCache::releaseEntries(const RenderDevice *device, [[maybe_unused]] bool failedOnly)
+{
+    const RestoreEglContext restore;
+    for (auto it = m_entries.begin(); it != m_entries.end();) {
+        if ((device && (*it)->device != device)
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+            || (failedOnly && !(*it)->context->isFailed())
+#endif
+        ) {
+            ++it;
+            continue;
+        }
+        if ((*it)->context != EglContext::currentContext() && !(*it)->context->makeCurrent()) {
+            // GL 名称可能在其他上下文中重用，失败时也不能让析构访问那个上下文。
+            if (auto *current = EglContext::currentContext()) {
+                current->doneCurrent();
+            }
+        }
+        it = m_entries.erase(it);
+    }
+}
+
+bool GpuRendererCache::ready() const
+{
+    return std::ranges::any_of(m_entries, [](const auto &entry) { return entry->ready; });
+}
+
+QString GpuRendererCache::diagnosticStatus() const
+{
+    QStringList summaries;
+    for (const auto &entry : m_entries) {
+        summaries.append(entry->renderer.diagnosticStatus());
+    }
+    return summaries.join(QStringLiteral(" | "));
 }
 
 } // namespace KWin

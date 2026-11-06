@@ -5,12 +5,53 @@
 #include <input_event.h>
 #include <scene/scene.h>
 
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+#include <core/gpumanager.h>
+#include <core/renderdevice.h>
+#include <opengl/eglcontext.h>
+#endif
+
 namespace KWin
 {
+
+BaClickFxEffectBase::BaClickFxEffectBase()
+{
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+    connect(GpuManager::self(), &GpuManager::renderDeviceRemoved, this, [this](RenderDevice *device) {
+        if (m_viewRenderDevice == device) {
+            m_viewRenderDevice = nullptr;
+        }
+        releaseRenderDevice(device);
+    });
+#endif
+}
+
+const RenderDevice *BaClickFxEffectBase::currentRenderDevice() const
+{
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+    const auto *context = EglContext::currentContext();
+    if (context) {
+        const auto *display = context->displayObject();
+        if (m_viewRenderDevice && m_viewRenderDevice->eglDisplay() == display) {
+            return m_viewRenderDevice;
+        }
+        // 额外的渲染遍可以使用与 prePaintScreen 不同的视图，以实际 EGL display 为准。
+        for (const auto &device : GpuManager::self()->renderDevices()) {
+            if (device->eglDisplay() == display) {
+                return device.get();
+            }
+        }
+    }
+#endif
+    return nullptr;
+}
 
 #ifndef BA_CLICK_FX_KWIN_LEGACY_PREPAINT
 void BaClickFxEffectBase::prePaintScreen(ScreenPrePaintData &data)
 {
+#ifndef BA_CLICK_FX_KWIN_LEGACY_PAINTSCREEN
+    m_viewRenderDevice = data.view ? data.view->renderDevice() : nullptr;
+#endif
     const auto now = data.view ? data.view->nextPresentationTimestamp() : std::chrono::nanoseconds{0};
     prepareScreen(data, now);
     effects->prePaintScreen(data);
@@ -38,7 +79,7 @@ bool BaClickFxEffectBase::paintScreen(const RenderTarget &renderTarget, const Re
     if (!effects->paintScreen(renderTarget, viewport, mask, deviceRegion, screen)) {
         return false;
     }
-    paintOverlay(renderTarget, viewport, deviceRegion);
+    paintOverlay(renderTarget, viewport, deviceRegion, screen);
     return true;
 }
 #else
@@ -47,7 +88,7 @@ void BaClickFxEffectBase::paintScreen(const RenderTarget &renderTarget, const Re
                                      int mask, const Region &deviceRegion, LogicalOutput *screen)
 {
     effects->paintScreen(renderTarget, viewport, mask, deviceRegion, screen);
-    paintOverlay(renderTarget, viewport, deviceRegion);
+    paintOverlay(renderTarget, viewport, deviceRegion, screen);
 }
 #endif
 

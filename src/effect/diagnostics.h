@@ -44,6 +44,9 @@ struct FrameStatsSummary
     std::uint64_t pointerMotionEvents = 0;
     std::uint64_t fallbackSamples = 0;
     QString output;
+    QString outputId;
+    double outputCpuAvgMs = -1.0;
+    double outputCpuMaxMs = -1.0;
     double outputGpuImportMs = -1.0;
     double outputGpuBloomMs = -1.0;
     double outputGpuCompositeMs = -1.0;

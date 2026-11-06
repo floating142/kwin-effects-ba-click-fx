@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "meshprofiles.h"
+#include "render/meshprofiles.h"
 #include "subsystems.h"
 #include "unity/initial.h"
 #include "unity/emission.h"
@@ -42,6 +42,9 @@ struct RingEmission
 struct TriParticle
 {
     baclickfx::unity::Motion worldMotion;
+    // 同一 Ring4 发射器可跨输出，已出生粒子保留原有投影。
+    double worldUnitPx = 0;
+    baclickfx::Subsystem::BillboardProjection billboard;
     float percentAge = 0;
     float inverseLifetime = 0;
     std::uint32_t seed = 0;
@@ -76,7 +79,7 @@ struct ParticleBirthFrame
 void applyTriParticleBirth(TriParticle &particle, std::uint64_t lane, const ParticleBirthFrame &frame);
 
 /// World 模拟空间：出生位置与速度已由原生出生管线变换，投影时不重复乘局部缩放。
-QPointF triParticleOffset(const TriParticle &particle, const baclickfx::Subsystem &params);
+QPointF triParticleOffset(const TriParticle &particle);
 
 struct TriBurstEmission
 {
@@ -90,7 +93,7 @@ struct TriBurstEmission
 };
 
 void appendTriBurst(TriBurstEmission &burst, const baclickfx::Subsystem &params,
-    double timeScale, int accepted, baclickfx::Rng &rng, ParticleEmitterState &state,
+    double timeScale, std::uint64_t requested, baclickfx::Rng &rng, ParticleEmitterState &state,
     const ParticleBirthFrame &frame, const baclickfx::unity::MotionVector &originOffset = {});
 
 /// MeshTri 的单个圆环弧段参数。

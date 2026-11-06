@@ -215,9 +215,9 @@ fi
 
 echo
 echo "日志和诊断请使用特效设置页。"
-echo "命令行排查：README.md 和 TESTING.md"
+echo "命令行排查：README.md 和 docs/testing.md"
 echo "运行状态：${QDBUS} org.kde.KWin /Effects debug ${EFFECT_ID} status"
 echo
 echo "Use the effect settings page for logs and diagnostics."
-echo "CLI troubleshooting: README.md and TESTING.md"
+echo "CLI troubleshooting: README.en.md and docs/testing.md"
 echo "Runtime status: ${QDBUS} org.kde.KWin /Effects debug ${EFFECT_ID} status"

@@ -199,10 +199,10 @@ bool clickInstanceAlive(const ClickInstance &instance)
 
 // 三角粒子簇发射
 
-QPointF triParticleOffset(const TriParticle &particle, const baclickfx::Subsystem &params)
+QPointF triParticleOffset(const TriParticle &particle)
 {
     const auto &p = particle.worldMotion.position;
-    return {p[0] * params.worldUnitPx, -p[1] * params.worldUnitPx};
+    return {p[0] * particle.worldUnitPx, -p[1] * particle.worldUnitPx};
 }
 
 void applyTriParticleBirth(TriParticle &particle, std::uint64_t lane, const ParticleBirthFrame &frame)
@@ -250,6 +250,8 @@ TriBurstEmission emitTriBurst(const baclickfx::Subsystem &params, double timeSca
         const auto point = emitter.shape.next(shape);
         const float velocity = startSpeed(sampled.seed, speed);
         TriParticle item;
+        item.worldUnitPx = params.worldUnitPx;
+        item.billboard = params.billboard;
         item.seed = sampled.seed;
         // World 出生管线在 Shape 内应用模拟矩阵，然后乘 StartSpeed。
         // scalingMode=Local 保留作者的叶节点缩放；不可把它放进会归一化的 Shape 方向。
@@ -279,9 +281,17 @@ TriBurstEmission emitTriBurst(const baclickfx::Subsystem &params, double timeSca
 
 // 点击实例组装
 void appendTriBurst(TriBurstEmission &burst, const baclickfx::Subsystem &params,
-    double timeScale, int accepted, baclickfx::Rng &rng, ParticleEmitterState &state,
+    double timeScale, std::uint64_t requested, baclickfx::Rng &rng, ParticleEmitterState &state,
     const ParticleBirthFrame &frame, const baclickfx::unity::MotionVector &originOffset)
 {
+    if (params.maxParticles > 0) {
+        const auto live = std::ranges::count_if(burst.particles, [](const TriParticle &particle) {
+            return baclickfx::unity::survives(particle.percentAge);
+        });
+        const auto available = std::max<std::ptrdiff_t>(0, params.maxParticles - live);
+        requested = std::min(requested, std::uint64_t(available));
+    }
+    const int accepted = int(requested);
     if (accepted <= 0) return;
     const std::size_t previous = burst.particles.size();
     const std::size_t first = (previous + 3) & ~std::size_t(3);

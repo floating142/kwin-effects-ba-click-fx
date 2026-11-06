@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "applicationfilter.h"
-#include "curveutils.h"
-#include "clickinstance.h"
-#include "bloomutils.h"
-#include "damageutils.h"
-#include "diagnostics.h"
-#include "meshprofiles.h"
-#include "pathresampler.h"
-#include "outputscaleutils.h"
-#include "mousebuttonutils.h"
+#include "input/applicationfilter.h"
+#include "particles/curveutils.h"
+#include "particles/clickinstance.h"
+#include "render/bloomutils.h"
+#include "render/damageutils.h"
+#include "effect/diagnostics.h"
+#include "render/meshprofiles.h"
+#include "render/outputscaleutils.h"
+#include "input/mousebuttonutils.h"
 #include "baclickfxdefaults.h"
-#include "subsystems.h"
-#include "trailstream.h"
+#include "particles/subsystems.h"
+#include "particles/trailstream.h"
 #include "unity/rotation.h"
 #include "unity/timing.h"
-#include "frameclock.h"
+#include "input/frameclock.h"
 
 #include <QTest>
 #include <QFile>
@@ -43,12 +42,9 @@ private Q_SLOTS:
     void trailPointsMatchNativeSnapshots();
     void trailStreamBoundsIncludePadding();
     void trailStreamKeepsNewestPointsAtCapacity();
-    void distanceStepUsesWorldUnits();
-    void particleCapLimitsBurst();
     void damageQuantizationGrowsOutward();
     void pointerPixelRespectsOutputSeams();
     void particleProgressMatchesPercentAge();
-    void pathResamplingIsEventSegmentationInvariant();
     void meshProfileLoadsObjAndUv();
     void frameStatsHaveStableFields();
     void uvFrameTileUsesDiscreteAtlasFrames();
@@ -57,6 +53,8 @@ private Q_SLOTS:
     void meshTriWorldRotationStepsBeforeAgeAdvance();
     void bloomPyramidMatchesPpv2Formula();
     void outputScaleUsesUnityOrthographicProjection();
+    void crossOutputTrailKeepsBothWidths();
+    void crossOutputBurstKeepsParticleProjectionAndCapacity();
     void outputScaleIdIsStable();
     void outputUuidIsPreferred();
     void applicationFilterNormalizesAndRoundTrips();
@@ -417,7 +415,7 @@ void LogicTests::triangleBirthMatchesNativeDispatcher()
         // Source world velocities already include the emitter scale once.
         auto moved = particle;
         baclickfx::unity::integrateMotion(moved.worldMotion, {}, .1f);
-        const QPointF delta = triParticleOffset(moved, params) - triParticleOffset(particle, params);
+        const QPointF delta = triParticleOffset(moved) - triParticleOffset(particle);
         QVERIFY(std::abs(delta.x() - particle.worldMotion.velocity[0] * .1 * 540) < 1e-5);
         QVERIFY(std::abs(delta.y() + particle.worldMotion.velocity[1] * .1 * 540) < 1e-5);
     }
@@ -445,7 +443,7 @@ void LogicTests::birthFrameTimingAndCapacityMatchNative()
         baclickfx::Rng rng(0);
         TriBurstEmission burst;
         burst.particles.resize(std::size_t(previous));
-        appendTriBurst(burst, params, 1, std::min(count,params.maxParticles-previous), rng, state, frame);
+        appendTriBurst(burst, params, 1, frame.rateCount, rng, state, frame);
         advanceTriBurstFrame(burst, frame.step);
         const auto expected = row[QStringLiteral("particles")].toArray();
         QCOMPARE(burst.particles.size(), std::size_t(previous + expected.size()));
@@ -692,28 +690,6 @@ void LogicTests::trailStreamKeepsNewestPointsAtCapacity()
     QCOMPARE(points.back().pos, QPointF(1100, 0));
 }
 
-void LogicTests::distanceStepUsesWorldUnits()
-{
-    baclickfx::Subsystem params;
-    params.worldUnitPx = 540.0;
-    params.rateOverDistance = 5.0;
-    QCOMPARE(distanceStepFromRing4(params), 108.0);
-    params.rateOverDistance = 0.0;
-    QVERIFY(std::isinf(distanceStepFromRing4(params)));
-}
-
-void LogicTests::particleCapLimitsBurst()
-{
-    baclickfx::Subsystem params;
-    params.distanceBurst = 4;
-    params.maxParticles = 64;
-    params.worldUnitPx = 540.0;
-    baclickfx::Rng rng(1234);
-    const TriBurstInstance burst = makeTriBurstInstance(
-        QPointF(0, 0), params, 20, 1.0, 7, rng);
-    QCOMPARE(static_cast<int>(burst.burst.particles.size()), 7);
-}
-
 void LogicTests::damageQuantizationGrowsOutward()
 {
     const QRect result = baclickfx::quantizeDamageRect(QRectF(65.2, 63.1, 2.0, 2.0));
@@ -742,20 +718,6 @@ void LogicTests::particleProgressMatchesPercentAge()
     QCOMPARE(particleProgress(100.00000762939453f), 1.f);
 }
 
-void LogicTests::pathResamplingIsEventSegmentationInvariant()
-{
-    const auto one = baclickfx::resamplePathSegment(QPointF(0, 0), QPointF(25, 0), 5.0, 0.0);
-    const auto first = baclickfx::resamplePathSegment(QPointF(0, 0), QPointF(12, 0), 5.0, 0.0);
-    const auto second = baclickfx::resamplePathSegment(QPointF(12, 0), QPointF(25, 0), 5.0,
-                                                       first.remainder);
-    QCOMPARE(one.points.size(), std::size_t(5));
-    QCOMPARE(first.points.size() + second.points.size(), one.points.size());
-    for (std::size_t i = 0; i < one.points.size(); ++i) {
-        const QPointF point = i < first.points.size() ? first.points[i] : second.points[i - first.points.size()];
-        QCOMPARE(point, one.points[i]);
-    }
-}
-
 void LogicTests::meshProfileLoadsObjAndUv()
 {
     const std::string path = std::string(BA_CLICK_FX_SOURCE_DIR)
@@ -776,11 +738,15 @@ void LogicTests::frameStatsHaveStableFields()
     stats.frames = 3;
     stats.cpuAvgMs = 0.25;
     stats.output = QStringLiteral("1920x1080@1.00");
+    stats.outputId = QStringLiteral("screen-uuid");
+    stats.outputCpuAvgMs = 0.2;
     const QString text = baclickfx::formatFrameStats(stats);
     QVERIFY(text.startsWith(QStringLiteral("event=frame_stats")));
     QVERIFY(text.contains(QStringLiteral("frames=3")));
     QVERIFY(text.contains(QStringLiteral("cpu_avg_ms=0.250")));
     QVERIFY(text.contains(QStringLiteral("output=\"1920x1080@1.00\"")));
+    QVERIFY(text.contains(QStringLiteral("output_id=\"screen-uuid\"")));
+    QVERIFY(text.contains(QStringLiteral("output_cpu_avg_ms=0.200")));
     QVERIFY(text.contains(QStringLiteral("skip_import=0")));
 }
 
@@ -864,8 +830,65 @@ void LogicTests::outputScaleUsesUnityOrthographicProjection()
 {
     const auto base = baclickfx::buildSubsystemMap(1.0, 1.0, 1080.0);
     const auto large = baclickfx::buildSubsystemMap(1.0, 1.4, 1080.0);
+    QVERIFY(base.ring.particleGradient);
+    QCOMPARE(base.ring.particleGradient.get(), large.ring.particleGradient.get());
+    QCOMPARE(base.trail.particleGradient.get(), large.trail.particleGradient.get());
     QVERIFY(std::abs(base.ring.worldUnitPx - (1080.0 / (2.0 * baclickfx::kUnityOrthographicSize))) < 1e-9);
     QVERIFY(std::abs(large.ring.worldUnitPx - base.ring.worldUnitPx * 1.4) < 1e-9);
+}
+
+void LogicTests::crossOutputTrailKeepsBothWidths()
+{
+    const auto hdmi = baclickfx::buildSubsystemMap(1, 2.0, 1080);
+    const auto edp = baclickfx::buildSubsystemMap(1, 0.5, 1080);
+    TrailStream stream;
+    stream.beginStroke(QPointF(0, 10), hdmi.trail.worldUnitPx);
+    stream.addSegment(QPointF(0, 10), QPointF(100, 10), hdmi.trail.worldUnitPx);
+    stream.addSegment(QPointF(100, 10), QPointF(200, 10), edp.trail.worldUnitPx);
+    stream.setHead(QPointF(210, 10), edp.trail.worldUnitPx);
+
+    const auto strokes = buildTrailStrokes(stream, edp.trail);
+    QCOMPARE(strokes.size(), std::size_t(1));
+    const auto &stroke = strokes.front();
+    QCOMPARE(stroke.samples.size(), std::size_t(3));
+    QCOMPARE(stroke.samples.back().pos, QPointF(210, 10));
+    std::array<double, 3> halfWidths{};
+    for (const auto &vertex : stroke.ribbon) {
+        const auto &center = stroke.ribbonInput[vertex.sample];
+        const double half = std::abs(double(vertex.position[1]) - center[1]) * stroke.worldUnitPx;
+        halfWidths[vertex.sample] = std::max(halfWidths[vertex.sample], half);
+    }
+    QVERIFY(std::abs(halfWidths[0] - edp.trail.widthPx * .5) < .001);
+    QVERIFY(std::abs(halfWidths[1] - hdmi.trail.widthPx * .5) < .001);
+    QVERIFY(std::abs(halfWidths[2] - hdmi.trail.widthPx * .5) < .001);
+}
+
+void LogicTests::crossOutputBurstKeepsParticleProjectionAndCapacity()
+{
+    const auto hdmi = baclickfx::buildSubsystemMap(1, 2.0, 1080);
+    const auto edp = baclickfx::buildSubsystemMap(1, 0.5, 1080);
+    TriBurstEmission burst;
+    ParticleEmitterState emitter(42);
+    baclickfx::Rng rng(42);
+    ParticleBirthFrame frame;
+    frame.rateCount = hdmi.ring4.maxParticles - 1;
+    appendTriBurst(burst, hdmi.ring4, 1, frame.rateCount, rng, emitter, frame);
+    QCOMPARE(burst.particles.size(), std::size_t(frame.rateCount));
+    const QPointF previousOffset = triParticleOffset(burst.particles.front());
+    const auto &before = burst.particles.front();
+    const double previousHalf = baclickfx::billboardHalfSize(hdmi.ring4, before.startSize, 1, 0);
+
+    frame.rateCount = 4;
+    appendTriBurst(burst, edp.ring4, 1, frame.rateCount, rng, emitter, frame);
+    QCOMPARE(burst.particles.size(), std::size_t(hdmi.ring4.maxParticles));
+    const auto &oldParticle = burst.particles.front();
+    const auto &newParticle = burst.particles.back();
+    QCOMPARE(triParticleOffset(oldParticle), previousOffset);
+    QCOMPARE(baclickfx::billboardHalfSize(burst.params, oldParticle.startSize, 1, 0, oldParticle.billboard),
+             previousHalf);
+    QCOMPARE(newParticle.worldUnitPx, edp.ring4.worldUnitPx);
+    QCOMPARE(baclickfx::billboardHalfSize(burst.params, newParticle.startSize, 1, 0, newParticle.billboard),
+             baclickfx::billboardHalfSize(edp.ring4, newParticle.startSize, 1, 0));
 }
 
 void LogicTests::outputScaleIdIsStable()
@@ -884,6 +907,13 @@ void LogicTests::outputUuidIsPreferred()
     QCOMPARE(baclickfx::preferredOutputScaleId({}, QStringLiteral("V"), QStringLiteral("M"),
                                                 QStringLiteral("S"), QStringLiteral("DP-1")),
              QStringLiteral("V|M|S|DP-1"));
+    const QString uuid = QStringLiteral("uuid-1");
+    const QString fingerprint = QStringLiteral("V|M|S|DP-1");
+    QJsonObject overrides{{fingerprint, 1.25}};
+    QCOMPARE(baclickfx::configuredOutputScale(overrides, QStringLiteral("new"), {}), 1.0);
+    QCOMPARE(baclickfx::configuredOutputScale(overrides, uuid, fingerprint), 1.25);
+    overrides.insert(uuid, 1.5);
+    QCOMPARE(baclickfx::configuredOutputScale(overrides, uuid, fingerprint), 1.5);
 }
 
 void LogicTests::applicationFilterNormalizesAndRoundTrips()

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Loader is supplied from the external, hash-pinned native reference checkout.
 #include "birth_native_loader.h"
-#include "clickinstance.h"
+#include "particles/clickinstance.h"
 #include "transform_native_loader.h"
 
 int main(int argc, char **argv)
@@ -93,7 +93,7 @@ int main(int argc, char **argv)
         put(context, 0x1d8, frame.emission.intervalScale); put(context, 0x1dc, carry);
         KWin::TriBurstEmission burst;
         burst.particles.resize(std::size_t(previous));
-        KWin::appendTriBurst(burst, params, 1, std::min(count, std::max(0, params.maxParticles - previous)), entropy, state, frame);
+        KWin::appendTriBurst(burst, params, 1, std::uint64_t(count), entropy, state, frame);
         native.frame(job.data(), arrays, .4f, dt, frame.rateCount, std::uint64_t(count), 0.f, frame.offset);
         std::uint64_t length=0; std::memcpy(&length,arrays+0x10,8);
         if(whole && dt>0) {

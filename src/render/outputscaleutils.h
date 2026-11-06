@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "baclickfxdefaults.h"
+
+#include <QJsonObject>
 #include <QString>
+
+#include <algorithm>
 
 namespace baclickfx {
 
@@ -16,6 +21,15 @@ inline QString preferredOutputScaleId(const QString &uuid, const QString &manufa
                                       const QString &name)
 {
     return uuid.isEmpty() ? outputScaleId(manufacturer, model, serialNumber, name) : uuid;
+}
+
+inline double configuredOutputScale(const QJsonObject &overrides, const QString &id,
+                                    const QString &fingerprint)
+{
+    const QJsonValue value = !id.isEmpty() && overrides.contains(id)
+        ? overrides.value(id) : overrides.value(fingerprint);
+    return std::clamp(value.toDouble(defaults::kGlobalScaleDefault),
+                      defaults::kGlobalScaleMin, defaults::kGlobalScaleMax);
 }
 
 } // namespace baclickfx
