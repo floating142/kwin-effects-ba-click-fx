@@ -4,25 +4,34 @@
 
 为 KDE Plasma / KWin 移植《蔚蓝档案》的 `FX_Touch`。点击时出现中心圆盘、溶解圆环和小三角，按住拖动时生成光带和沿途粒子。
 
+[特性](#特性) · [运行要求](#运行要求) · [安装与启用](#安装与启用) · [配置](#配置)
+
 ![BA Click FX 点击与拖尾预览](preview/logo.gif)
 
-- **点击和拖尾可分别设置。** 左键、右键和中键可多选，也可单独启用始终显示拖尾。
-- **支持多屏和 HiDPI。** 可逐屏调整尺寸，拖尾按光标所在屏幕的呈现帧采样。
-- **按原版参数渲染。** 使用原版贴图和网格，通过 C++ / OpenGL 完成线性 HDR 混合和 Bloom。 [FX_Touch 核对记录](docs/unity-parity.md)
+## 特性
 
-## 安装与启用
+- **还原原版粒子与光带。** 采用原版粒子贴图、`Cylinder002` 网格和 UV，移植 Ring、MeshTri、Ring3、Ring4 和 TrailRenderer 的颜色、发光强度、大小、旋转、寿命与 UV 动画。 [FX_Touch 核对记录](docs/unity-parity.md)
+- **原生 GPU 渲染。** 通过 C++ 和 OpenGL 在 RGBA16F 线性场景中混合粒子，复刻 Unity PPv2 的 `MXFinalBloom`，并按 KWin 输出的色彩描述合成到 SDR 或 HDR 屏幕。
+- **局部重绘与逐屏缓存。** 缩小背景导入和合成范围，复用各输出的渲染缓冲。普通 SDR 输出还可将辉光计算限制在受影响的区域。 [渲染架构](docs/architecture.md)
+- **可组合的鼠标触发。** 左键、右键和中键可独立选择，点击动画与拖尾分别开关，也可在无需按住按键时始终显示拖尾。
+- **多屏和 HiDPI。** 支持逐屏调整尺寸。拖尾按光标所在屏幕的呈现帧采样，跨屏时新生成的拖尾和小三角使用目标屏幕的倍率。
+- **实时预览和诊断。** 在设置页预览改动，按需查看重绘范围、CPU/GPU 分阶段耗时和结构化诊断报告。
+
+## 运行要求
 
 | 项目 | 要求 |
 | --- | --- |
-| 桌面 | KDE Plasma 6 和 OpenGL 合成 |
-| KWin | 以 6.8 为主要目标，保留 6.6 / 6.7 兼容 |
-| 构建 | C++20 编译器、CMake 3.20+、ECM 6.22+、Qt 6.10+、KF6 6.22+ |
+| 桌面 | KDE Plasma 6 |
+| KWin | 主要支持 6.8，兼容 6.6 和 6.7 |
+| 图形 | KWin 的 OpenGL 合成，驱动需支持着色器和 RGBA16F 帧缓冲 |
 
-KWin 开发包须与当前运行的 KWin 版本匹配。升级 KWin 后需要重新编译插件。
+原生插件绑定到构建时的 KWin 版本。请使用与当前会话匹配的 KWin 开发包，升级 KWin 后需重新编译插件。
+
+## 安装与启用
 
 ### 安装构建依赖
 
-展开对应发行版的命令。构建依赖需满足上表版本。
+源码构建需要 C++20 编译器、CMake 3.20+、ECM 6.22+、Qt 6.10+、KF6 6.22+、Gettext、OpenGL 开发文件和匹配版本的 KWin 开发包。可展开对应发行版的命令。
 
 <details>
 <summary>Arch Linux</summary>
@@ -51,7 +60,7 @@ sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules \
-  g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev \
+  g++ gettext git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev \
   libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev \
   qt6-declarative-dev qt6-tools-dev libvulkan-dev
 ```
@@ -72,6 +81,8 @@ sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake 
 
 ## 配置
 
+在 **桌面特效** 中点击 **BA Click FX** 右侧的配置按钮。调整完成后点击 **应用** 保存。
+
 | 设置页 | 可以调整的内容 |
 | --- | --- |
 | **效果** | 点击动画、触发按键、拖尾、始终显示拖尾和沿途小三角 |
@@ -81,9 +92,9 @@ sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake 
 
 默认开启点击、拖尾和沿途小三角，仅左键触发。全屏抑制默认关闭。每个新按下的已选按键触发一次点击，多个已选按键共用一条拖尾，最后一个松开时才结束。清空按键选择后，“始终显示拖尾”仍可独立使用。右键菜单和中键粘贴照常工作。
 
-开启全屏抑制后，按住拖入全屏窗口会停止发射，已有内容自然淡出。拖出时从当前位置重新起笔。若要排除指定应用，在“触发范围”中启用应用排除，再用“选取窗口…”将应用加入列表。
+开启显示器独立缩放后，每个屏幕使用自己的倍率。尚未配置的屏幕默认为 `1.00`。
 
-配置支持实时预览，点击“应用”后保存。
+开启全屏抑制后，按住拖入全屏窗口会停止发射，已有内容自然淡出。拖出时从当前位置重新起笔。若要排除指定应用，在“触发范围”中启用应用排除，再用“选取窗口…”将应用加入列表。
 
 ## 排查问题
 

@@ -4,25 +4,34 @@
 
 A KDE Plasma / KWin port of Blue Archive’s `FX_Touch`. Click to show a central disc, dissolving rings, and triangle particles. Hold a trigger button and move to draw a ribbon trail with particles along its path.
 
+[Features](#features) · [Runtime requirements](#runtime-requirements) · [Install and enable](#install-and-enable) · [Configure](#configure)
+
 ![BA Click FX click and trail preview](preview/logo.gif)
 
-- **Separate click and trail controls.** Select any combination of left, right, and middle buttons, or enable an always-on trail.
-- **Multi-monitor and HiDPI support.** Set the size per display. Trail sampling follows the presentation frames of the display under the cursor.
-- **Rendering based on the original effect.** BA Click FX uses the original textures and mesh with native C++ / OpenGL, linear HDR blending, and Bloom. [FX_Touch parity notes](docs/unity-parity.md)
+## Features
 
-## Install and enable
+- **Original particles and ribbon.** Uses the original particle textures and `Cylinder002` mesh with its UVs. The port follows the authored colors, brightness, sizes, rotation, lifetime, and UV animation of Ring, MeshTri, Ring3, Ring4, and TrailRenderer. [FX_Touch parity notes](docs/unity-parity.md)
+- **Native GPU rendering.** C++ and OpenGL blend particles in a linear RGBA16F scene, reproduce Unity PPv2’s `MXFinalBloom`, and composite for SDR or HDR using KWin’s output color description.
+- **Partial repaints and per-output buffers.** The renderer limits background import and compositing to affected regions and reuses buffers per display. On standard SDR outputs, Bloom processing can also be restricted to the affected region. [Rendering architecture](docs/architecture.md)
+- **Configurable mouse triggers.** Select any combination of left, right, and middle buttons. Toggle click bursts and trails independently, or let the trail follow the pointer without holding a button.
+- **Multi-monitor and HiDPI support.** Set a scale for each display. The effect samples the trail at presentation time on the display under the pointer. After crossing to another display, new trail segments and triangle particles use that display’s scale.
+- **Live preview and diagnostics.** Preview changes in the settings page and inspect repaint outlines, per-stage CPU/GPU timings, or structured diagnostic reports.
+
+## Runtime requirements
 
 | Component | Requirement |
 | --- | --- |
-| Desktop | KDE Plasma 6 with OpenGL compositing |
-| KWin | 6.8 is the primary target, with 6.6 and 6.7 compatibility |
-| Build tools | A C++20 compiler, CMake 3.20+, ECM 6.22+, Qt 6.10+, and KF6 6.22+ |
+| Desktop | KDE Plasma 6 |
+| KWin | 6.8 is the primary target, with compatibility for 6.6 and 6.7 |
+| Graphics | KWin OpenGL compositing with shader and RGBA16F framebuffer support |
 
-Use development packages that match your running KWin version. Rebuild the plugin after upgrading KWin.
+The native plugin is tied to the KWin version it was built against. Use development packages that match your current session and rebuild the plugin after upgrading KWin.
+
+## Install and enable
 
 ### Install build dependencies
 
-Expand the command for your distribution. The installed packages must meet the versions listed above.
+Building from source requires a C++20 compiler, CMake 3.20+, ECM 6.22+, Qt 6.10+, KF6 6.22+, Gettext, OpenGL development files, and matching KWin development packages. Expand the command for your distribution.
 
 <details>
 <summary>Arch Linux</summary>
@@ -51,7 +60,7 @@ sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules \
-  g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev \
+  g++ gettext git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev \
   libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev \
   qt6-declarative-dev qt6-tools-dev libvulkan-dev
 ```
@@ -72,6 +81,8 @@ The installer also accepts `--user`, `--no-reload`, and `--help`. Set `JOBS=4` t
 
 ## Configure
 
+Click the settings button next to **BA Click FX** in **Desktop Effects**. Select **Apply** to save your changes.
+
 | Tab | Controls |
 | --- | --- |
 | **Effects** | Click animations, trigger buttons, trails, always-on trails, and particles along the trail |
@@ -81,9 +92,9 @@ The installer also accepts `--user`, `--no-reload`, and `--help`. Set `JOBS=4` t
 
 Click animations, trails, and distance particles are enabled by default, with the left button as the only trigger. Fullscreen suppression is off by default. Each newly pressed selected button plays one click burst. Selected buttons share a trail until the last one is released. **Always show trail** works with all trigger buttons cleared. Context menus and middle-click paste continue to work.
 
-With fullscreen suppression enabled, dragging into a fullscreen window stops emission and lets existing particles and trails fade. Leaving the window starts a new stroke at the current pointer position. To exclude an app, enable app exclusions under **Where to show** and use **Pick window…** to add it.
+With per-display scaling enabled, each display uses its own scale. Displays without a saved value default to `1.00`.
 
-Preview changes in the settings page and select **Apply** to save them.
+With fullscreen suppression enabled, dragging into a fullscreen window stops emission and lets existing particles and trails fade. Leaving the window starts a new stroke at the current pointer position. To exclude an app, enable app exclusions under **Where to show** and use **Pick window…** to add it.
 
 ## Troubleshoot
 
