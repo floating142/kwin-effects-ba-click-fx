@@ -17,6 +17,7 @@ required_files=(
   po/zh_CN/kwin_ba_click_fx_config.po
   po/zh_TW/kwin_ba_click_fx_config.po
   src/metadata.json src/effect/baclickfxeffect.cpp src/effect/baclickfxeffect.h
+  src/kwinversionstamp.h.in
   src/effect/kwincompat.cpp src/effect/kwincompat.h
   src/input/frameclock.h src/unity/trailpoints.h src/unity/emission.h src/unity/lineribbon.h src/unity/billboard.h
   tests/native/billboard_oracle.cpp

@@ -81,36 +81,19 @@ else
   BUILD_JOBS=2
 fi
 
-# KWin 把补丁版本也编进工厂 IID。升级 KWin 后，moc 不会跟踪 /usr/include 下
-# 变化的 KWin 头文件，增量构建会继续产出旧 IID 的二进制。检测到不匹配时先清空
-# 构建目录，避免装上一个必然被 KWin 拒绝加载的插件。
-clean_stale_build() {
-  local running built
-  running="$(kwin_wayland --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-  built="$(strings "${BUILD_DIR}/bin/${EFFECT_ID}.so" 2>/dev/null \
-           | grep -oE 'EffectPluginFactory[0-9]+\.[0-9]+\.[0-9]+' \
-           | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-
-  if [[ -n "${running}" && -n "${built}" && "${running}" != "${built}" ]]; then
-    echo "检测到 KWin 已从 ${built} 变为 ${running}，清理旧构建。" >&2
-    echo "KWin changed from ${built} to ${running}; removing the stale build." >&2
-    rm -rf -- "${BUILD_DIR}"
-  fi
-}
-
 # KWin native effect 的工厂 IID 包含 KWin 版本，不匹配时插件会被忽略。
 check_abi() {
-  local running built
-  running="$(kwin_wayland --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  local installed built
+  installed="$(kwin_wayland --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
   built="$(strings "${BUILD_DIR}/bin/${EFFECT_ID}.so" 2>/dev/null \
            | grep -oE 'EffectPluginFactory[0-9]+\.[0-9]+\.[0-9]+' \
            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 
-  if [[ -n "${running}" && -n "${built}" && "${running}" != "${built}" ]]; then
-    echo "警告：插件是针对 KWin ${built} 编译的，当前运行的是 ${running}。" >&2
-    echo "      请删除 ${BUILD_DIR} 后重新编译。" >&2
-    echo "Warning: built for KWin ${built}, but the running version is ${running}." >&2
-    echo "Remove ${BUILD_DIR} and rebuild." >&2
+  if [[ -n "${installed}" && -n "${built}" && "${installed}" != "${built}" ]]; then
+    echo "警告：插件是针对 KWin ${built} 编译的，已安装的 KWin 是 ${installed}。" >&2
+    echo "      请确认 KWin 开发包版本与已安装的 KWin 一致，然后重新编译。" >&2
+    echo "Warning: built for KWin ${built}, but the installed version is ${installed}." >&2
+    echo "Use matching KWin development packages and rebuild." >&2
   fi
 }
 
@@ -131,8 +114,6 @@ if [[ -d "${BUILD_DIR}" ]] && find "${BUILD_DIR}" -uid 0 -print -quit 2>/dev/nul
   require_command sudo
   sudo rm -rf -- "${BUILD_DIR}"
 fi
-
-clean_stale_build
 
 if ! cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \

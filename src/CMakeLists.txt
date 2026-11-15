@@ -2,9 +2,16 @@
 
 add_library(kwin4_effect_ba_click_fx MODULE)
 
+# KWin 的 ABI 和工厂 IID 均绑定到完整版本。目标级定义使所有 C++ 文件随版本
+# 变化重新编译；本地版本标记让 AutoMoc 同步更新 main.moc，即使系统头文件的
+# 时间戳早于旧构建产物。configure_file 仅在版本变化时更新标记。
+target_compile_definitions(kwin4_effect_ba_click_fx PRIVATE
+    BA_CLICK_FX_KWIN_VERSION="${KWin_VERSION}"
+)
+configure_file(kwinversionstamp.h.in kwinversionstamp.h @ONLY)
+
 set_property(SOURCE effect/baclickfxeffect.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     BA_CLICK_FX_BUILD_ID="${BA_CLICK_FX_BUILD_ID}"
-    BA_CLICK_FX_KWIN_VERSION="${KWin_VERSION}"
 )
 
 # KWin 6.8 为默认 API；旧版差异集中在生命周期和渲染上下文管理。
@@ -45,7 +52,10 @@ target_sources(kwin4_effect_ba_click_fx PRIVATE
     main.cpp
 )
 
-target_include_directories(kwin4_effect_ba_click_fx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(kwin4_effect_ba_click_fx PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
 
 target_link_libraries(kwin4_effect_ba_click_fx PRIVATE
     KWin::kwin

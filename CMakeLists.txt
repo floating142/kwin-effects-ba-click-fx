@@ -14,6 +14,7 @@ option(BA_CLICK_FX_BUILD_GPU_TESTS "Build the optional offscreen GPU regression 
 file(GLOB_RECURSE BA_CLICK_FX_BUILD_ID_FILES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_SOURCE_DIR}/src/*.h"
+    "${CMAKE_SOURCE_DIR}/src/*.h.in"
     "${CMAKE_SOURCE_DIR}/shader/*.vert"
     "${CMAKE_SOURCE_DIR}/shader/*.frag"
     "${CMAKE_SOURCE_DIR}/shader/*.glsl"

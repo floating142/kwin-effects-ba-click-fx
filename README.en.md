@@ -25,7 +25,7 @@ A KDE Plasma / KWin port of Blue Archive’s `FX_Touch`. Click to show a central
 | KWin | 6.8 is the primary target, with compatibility for 6.6 and 6.7 |
 | Graphics | KWin OpenGL compositing with shader and RGBA16F framebuffer support |
 
-The native plugin is tied to the KWin version it was built against, and the factory IID includes the patch version. Use development packages that match your current session and rebuild the plugin after any KWin upgrade, including patch releases such as 6.8.1 → 6.8.2; otherwise KWin ignores the stale binary. `install-local.sh` detects the version change and removes the stale build directory automatically.
+The native plugin is tied to the KWin version it was built against, and the factory IID includes the patch version. Use development packages that match your current session and rebuild the plugin after any KWin upgrade, including patch releases such as 6.8.1 → 6.8.2; otherwise KWin ignores the stale binary. CMake automatically refreshes the plugin metadata when the KWin development package version changes, without deleting the build directory.
 
 ## Install and enable
 
