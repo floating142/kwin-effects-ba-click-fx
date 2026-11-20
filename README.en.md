@@ -79,6 +79,25 @@ sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake 
 
 The installer also accepts `--user`, `--no-reload`, and `--help`. Set `JOBS=4` to choose the number of parallel build jobs.
 
+### Rebuild after a KWin upgrade (optional)
+
+For an installation made with `./install-local.sh --system`, enable the Plasma login check with:
+
+```bash
+./scripts/rebuild-on-login.sh --enable
+./scripts/rebuild-on-login.sh --check
+```
+
+This requires Qt 6's `qtplugininfo`, `flock`, `kdialog`, and Polkit (`pkexec`). Keep the checkout,
+build directory, and KWin development files that match the installed version. At login the script
+checks the installed plugin's IID locally and builds only if it differs from the installed KWin
+version. It verifies the new plugin before asking for permission to install it. After installation,
+log out and back in. Logs are stored in `${XDG_STATE_HOME:-~/.local/state}/ba-click-fx/`.
+
+Run the script with `--run` to check and rebuild immediately, or use `--disable` to turn off the
+login check. This applies to system installs from source with their original build directory.
+For package-managed installs, use the corresponding package manager to update the plugin.
+
 ## Configure
 
 Click the settings button next to **BA Click FX** in **Desktop Effects**. Select **Apply** to save your changes.

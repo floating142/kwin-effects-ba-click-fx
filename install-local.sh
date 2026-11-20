@@ -48,23 +48,34 @@ fi
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Effect id 由插件文件名派生，同时用于配置键和 D-Bus 调用。
-EFFECT_ID="kwin4_effect_ba_click_fx"
+source "${SRC_DIR}/scripts/kwin-abi.sh"
+EFFECT_ID="${BA_CLICK_FX_EFFECT_ID}"
 
 MODE="system"
 RELOAD=1
+REPAIR=0
 for arg in "$@"; do
   case "${arg}" in
     --user) MODE="user" ;;
     --system) MODE="system" ;;
     --no-reload) RELOAD=0 ;;
+    --repair) REPAIR=1 ;; # Invoked by scripts/rebuild-on-login.sh.
     -h|--help) usage; exit 0 ;;
     *) echo "未知参数：${arg}" >&2; echo "Unknown option: ${arg}" >&2; usage >&2; exit 2 ;;
   esac
 done
 
 require_command cmake
-require_command strings
-if [[ "${MODE}" == "system" ]]; then
+if (( REPAIR )); then
+  [[ "${MODE}" == "system" ]] || die "Automatic rebuild supports system source installs only."
+  require_command flock
+  require_command kdialog
+  require_command pkexec
+  RELOAD=0
+else
+  require_command strings
+fi
+if [[ "${MODE}" == "system" ]] && (( ! REPAIR )); then
   require_command sudo
 fi
 
@@ -84,7 +95,7 @@ fi
 # KWin native effect 的工厂 IID 包含 KWin 版本，不匹配时插件会被忽略。
 check_abi() {
   local installed built
-  installed="$(kwin_wayland --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  installed="$(ba_click_fx_kwin_version 2>/dev/null || true)"
   built="$(strings "${BUILD_DIR}/bin/${EFFECT_ID}.so" 2>/dev/null \
            | grep -oE 'EffectPluginFactory[0-9]+\.[0-9]+\.[0-9]+' \
            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
@@ -97,8 +108,6 @@ check_abi() {
   fi
 }
 
-echo "==> 配置"
-echo "==> Configure"
 if [[ "${MODE}" == "user" ]]; then
   PREFIX="${HOME}/.local"
 else
@@ -106,9 +115,25 @@ else
 fi
 # KDEInstallDirs 会把安装目录写入 CMake 缓存，因此两种模式使用独立构建目录。
 BUILD_DIR="${SRC_DIR}/build/plugin-${MODE}"
+if command -v flock >/dev/null && ! ba_click_fx_lock_build "${BUILD_DIR}"; then
+  die "已有安装或卸载正在使用此构建目录 / Another install or uninstall is using this build directory."
+fi
 
-# 旧版本曾用 root 创建构建文件。只清理当前模式的构建目录，保留其他构建目录。
-if [[ -d "${BUILD_DIR}" ]] && find "${BUILD_DIR}" -uid 0 -print -quit 2>/dev/null | grep -q .; then
+if (( REPAIR )); then
+  original_plugin="$(ba_click_fx_installed_plugin "${BUILD_DIR}")" || exit 0
+  installed_version="$(ba_click_fx_kwin_version)" || die "无法读取 KWin 版本 / Cannot read the KWin version."
+  old_version="$(ba_click_fx_plugin_version "${original_plugin}")" ||
+    die "无法读取已安装插件的 IID / Cannot read the installed plugin IID."
+  [[ "${installed_version}" != "${old_version}" ]] || exit 0
+  echo "KWin ${installed_version}, installed plugin IID version ${old_version}"
+fi
+
+echo "==> 配置"
+echo "==> Configure"
+
+# 旧版本曾以 root 构建。普通安装也可能留下 root 写入的安装清单，清单不影响增量编译。
+if (( ! REPAIR )) && [[ -d "${BUILD_DIR}" ]] &&
+    find "${BUILD_DIR}" -uid 0 ! -path "${BUILD_DIR}/install_manifest.txt" -print -quit 2>/dev/null | grep -q .; then
   echo "清理旧的管理员构建目录：${BUILD_DIR}" >&2
   echo "Removing old root-owned build: ${BUILD_DIR}" >&2
   require_command sudo
@@ -131,16 +156,56 @@ if [[ ! -s "${BUILD_DIR}/plugin-install-dir.txt" ]]; then
   exit 1
 fi
 PLUGIN_DIR="$(<"${BUILD_DIR}/plugin-install-dir.txt")"
+EFFECT_PATH="${PLUGIN_DIR}/kwin/effects/plugins/${EFFECT_ID}.so"
+CONFIG_PATH="${PLUGIN_DIR}/kwin/effects/configs/kwin_ba_click_fx_config.so"
+
+if (( REPAIR )); then
+  [[ "${EFFECT_PATH}" == "${original_plugin}" ]] ||
+    die "插件安装路径已变更，请手动安装 / Plugin path changed. Run a manual install."
+  [[ -s "${BUILD_DIR}/kwin-build-version.txt" &&
+     "$(<"${BUILD_DIR}/kwin-build-version.txt")" == "${installed_version}" ]] ||
+    die "KWin 开发包与已安装版本不匹配 / KWin development files do not match the installed version."
+fi
 
 echo "==> 编译"
 echo "==> Build"
 cmake --build "${BUILD_DIR}" -j"${BUILD_JOBS}"
 
-check_abi
+if (( REPAIR )); then
+  built_version="$(ba_click_fx_plugin_version "${BUILD_DIR}/bin/${EFFECT_ID}.so")" ||
+    die "无法读取构建产物的 IID / Cannot read the rebuilt plugin IID."
+  [[ "${built_version}" == "${installed_version}" ]] ||
+    die "构建产物的 IID 与 KWin 不匹配 / Rebuilt plugin IID does not match KWin."
+  [[ -f "${BUILD_DIR}/bin/kwin_ba_click_fx_config.so" ]] ||
+    die "缺少设置模块 / The rebuilt settings module is missing."
+
+  if kdialog --title 'BA Click FX' --yesno \
+      "已为 KWin ${installed_version} 重建 BA Click FX，是否安装？\nBA Click FX was rebuilt for KWin ${installed_version}. Install it now?"; then
+    :
+  else
+    status=$?
+    [[ "${status}" == 1 ]] || die "无法显示安装确认 / Could not show the installation prompt."
+    echo "Installation declined."
+    exit 0
+  fi
+  [[ "$(ba_click_fx_kwin_version)" == "${installed_version}" ]] ||
+    die "KWin 版本再次变化，请重新构建 / KWin changed again. Rebuild before installing."
+else
+  check_abi
+fi
 
 echo "==> 安装到 ${PREFIX}"
 echo "==> Install to ${PREFIX}"
-if [[ "${MODE}" == "system" ]]; then
+if (( REPAIR )); then
+  if pkexec --disable-internal-agent "$(command -v cmake)" --install "${BUILD_DIR}"; then
+    :
+  else
+    status=$?
+    [[ "${status}" == 126 ]] || exit "${status}"
+    echo "Authorization cancelled."
+    exit 0
+  fi
+elif [[ "${MODE}" == "system" ]]; then
   sudo cmake --install "${BUILD_DIR}"
 else
   cmake --install "${BUILD_DIR}"
@@ -151,8 +216,6 @@ else
   echo "      export QT_PLUGIN_PATH=\"${PLUGIN_DIR}:\${QT_PLUGIN_PATH}\""
 fi
 
-EFFECT_PATH="${PLUGIN_DIR}/kwin/effects/plugins/${EFFECT_ID}.so"
-CONFIG_PATH="${PLUGIN_DIR}/kwin/effects/configs/kwin_ba_click_fx_config.so"
 if [[ ! -f "${EFFECT_PATH}" || ! -f "${CONFIG_PATH}" ]]; then
   echo "安装失败：安装完成但未在 ${PLUGIN_DIR} 找到模块。" >&2
   echo "Installation failed: installed modules not found under ${PLUGIN_DIR}." >&2
@@ -161,6 +224,12 @@ fi
 echo "Effect: ${EFFECT_PATH}"
 echo "Config: ${CONFIG_PATH}"
 
+if (( REPAIR )); then
+  [[ "$(ba_click_fx_plugin_version "${EFFECT_PATH}")" == "${installed_version}" ]] ||
+    die "安装后的 IID 校验失败 / The installed plugin IID could not be verified."
+  kdialog --title 'BA Click FX' --msgbox \
+    "安装完成。请注销并重新登录 Plasma。\nInstalled. Log out and back in to Plasma." || true
+fi
 if [[ "${RELOAD}" -eq 0 ]]; then
   exit 0
 fi

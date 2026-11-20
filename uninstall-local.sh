@@ -23,7 +23,8 @@ if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
 fi
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EFFECT_ID="kwin4_effect_ba_click_fx"
+source "${SRC_DIR}/scripts/kwin-abi.sh"
+EFFECT_ID="${BA_CLICK_FX_EFFECT_ID}"
 CONFIG_ID="kwin_ba_click_fx_config"
 CONFIG_GROUP="Effect-ba-click-fx"
 
@@ -40,6 +41,10 @@ for arg in "$@"; do
 done
 
 BUILD_DIR="${SRC_DIR}/build/plugin-${MODE}"
+if command -v flock >/dev/null && ! ba_click_fx_lock_build "${BUILD_DIR}"; then
+  echo "已有安装或卸载正在使用此构建目录 / Another install or uninstall is using this build directory." >&2
+  exit 1
+fi
 MANIFEST="${BUILD_DIR}/install_manifest.txt"
 PLUGIN_DIR_FILE="${BUILD_DIR}/plugin-install-dir.txt"
 DATA_DIR_FILE="${BUILD_DIR}/data-install-dir.txt"

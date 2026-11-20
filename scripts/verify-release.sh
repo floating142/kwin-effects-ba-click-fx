@@ -53,6 +53,7 @@ required_files=(
   shader/bloom_downsample.frag shader/bloom_prefilter.frag
   shader/bloom_upsample.frag shader/composite.frag shader/dissolve.frag
   install-local.sh uninstall-local.sh test-nested.sh
+  scripts/kwin-abi.sh scripts/rebuild-on-login.sh
   scripts/ci-environment-report.sh scripts/make-release.sh scripts/verify-release.sh
 )
 

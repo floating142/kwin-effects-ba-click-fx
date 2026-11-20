@@ -54,6 +54,7 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui DBus Quick Widgets)
 find_package(KF6 6.22 REQUIRED COMPONENTS Config CoreAddons I18n KCMUtils Service WindowSystem)
 
 find_package(KWin 6.6 REQUIRED)
+file(CONFIGURE OUTPUT kwin-build-version.txt CONTENT "${KWin_VERSION}\n" @ONLY)
 
 # EffectPluginFactory 的接口标识包含 KWin 版本，升级 KWin 后必须重新编译插件。
 # 配置阶段输出目标版本，供文档与安装脚本核对。

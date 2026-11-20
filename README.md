@@ -79,6 +79,23 @@ sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake 
 
 安装脚本也支持 `--user`、`--no-reload` 和 `--help`。可用 `JOBS=4` 指定编译并行数。
 
+### KWin 升级后自动重建（可选）
+
+如果你用 `./install-local.sh --system` 安装，可以开启 Plasma 登录检查：
+
+```bash
+./scripts/rebuild-on-login.sh --enable
+./scripts/rebuild-on-login.sh --check
+```
+
+需要 Qt 6 的 `qtplugininfo`、`flock`、`kdialog` 和 Polkit（`pkexec`），也要保留源码、
+构建目录和与 KWin 匹配的开发包。每次登录只做本机检查；发现已安装插件的 IID
+与 KWin 版本不匹配时，用现有源码增量编译。构建并验证成功后会询问是否进行系统安装，
+完成后请注销并重新登录。日志在 `${XDG_STATE_HOME:-~/.local/state}/ba-click-fx/`。
+
+可运行同一个脚本的 `--run` 立即检查并按需重建，或用 `--disable` 关闭自启动。
+此功能适用于保留源码和原构建目录的系统安装。由软件包管理的安装请通过对应的包管理器更新。
+
 ## 配置
 
 在 **桌面特效** 中点击 **BA Click FX** 右侧的配置按钮。调整完成后点击 **应用** 保存。
