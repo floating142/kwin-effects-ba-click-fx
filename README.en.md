@@ -81,7 +81,7 @@ The installer also accepts `--user`, `--no-reload`, and `--help`. Set `JOBS=4` t
 
 ### Rebuild after a KWin upgrade (optional)
 
-For an installation made with `./install-local.sh --system`, enable the Plasma login check with:
+After an interactive system install, the installer offers to enable the Plasma login check. It defaults to off and skips the prompt if an autostart entry already exists. To enable it manually:
 
 ```bash
 ./scripts/rebuild-on-login.sh --enable

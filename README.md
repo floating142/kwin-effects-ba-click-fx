@@ -81,7 +81,7 @@ sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake 
 
 ### KWin 升级后自动重建（可选）
 
-如果你用 `./install-local.sh --system` 安装，可以开启 Plasma 登录检查：
+交互式系统安装成功后，脚本会询问是否开启 Plasma 登录检查，默认不开启。已有自启动设置时会跳过询问。也可以手动开启：
 
 ```bash
 ./scripts/rebuild-on-login.sh --enable

@@ -1,99 +1,83 @@
 #!/usr/bin/env bash
-# 编译并安装 BA Click FX，然后重建当前 KWin 中的 effect 实例。
-# 用法：./install-local.sh [--user | --system] [--no-reload] [--help]
-#
-# 默认 --system，安装步骤会按需请求管理员权限；--user 安装到 ~/.local，主要用于
-# test-nested.sh。请以当前用户运行脚本，不要为整个脚本加 sudo。
-
+# 默认安装到 /usr。请以普通用户运行，安装时按需授权。
 set -euo pipefail
 
+SRC_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "${SRC_DIR}/scripts/kwin-abi.sh"
+EFFECT_ID="${BA_CLICK_FX_EFFECT_ID}"
+
 usage() {
-  cat <<'EOF'
-用法：./install-local.sh [选项]
-Usage: ./install-local.sh [options]
-
-  --system       安装到 /usr（默认）
-                 Install to /usr (default)
-  --user         安装到 ~/.local
-                 Install to ~/.local
-  --no-reload    不重载当前 KWin 特效
-                 Do not reload the current KWin effect
-  -h, --help     显示帮助
-                 Show help
-
-JOBS=N 可指定编译并行数。
-JOBS=N sets the number of build jobs.
-EOF
+  ba_click_fx_message \
+    '用法：./install-local.sh [--system | --user] [--no-reload]
+  --system     安装到 /usr（默认）
+  --user       安装到 ~/.local
+  --no-reload  跳过特效重载
+  -h, --help   显示帮助
+设置 JOBS=N 可指定编译并行数。' \
+    'Usage: ./install-local.sh [--system | --user] [--no-reload]
+  --system     Install to /usr (default)
+  --user       Install to ~/.local
+  --no-reload  Skip reloading the effect
+  -h, --help   Show help
+Set JOBS=N to choose the number of build jobs.'
 }
 
 die() {
-  echo "安装失败：$*" >&2
-  echo "Installation failed: $*" >&2
+  ba_click_fx_message "安装失败：$1" "Installation failed: $2" >&2
   exit 1
 }
 
 require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "未找到命令：$1" >&2
-    echo "Missing command: $1" >&2
-    exit 1
-  fi
+  command -v "$1" >/dev/null || die "缺少命令 $1。" "Missing command $1."
 }
 
-if [[ "${EUID}" -eq 0 ]]; then
-  echo "请以普通用户运行；脚本会在安装时请求权限。" >&2
-  echo "Run as your normal user; the script requests access when installing." >&2
-  exit 2
-fi
-
-SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Effect id 由插件文件名派生，同时用于配置键和 D-Bus 调用。
-source "${SRC_DIR}/scripts/kwin-abi.sh"
-EFFECT_ID="${BA_CLICK_FX_EFFECT_ID}"
-
-MODE="system"
+MODE=system
 RELOAD=1
 REPAIR=0
 for arg in "$@"; do
   case "${arg}" in
-    --user) MODE="user" ;;
-    --system) MODE="system" ;;
+    --user) MODE=user ;;
+    --system) MODE=system ;;
     --no-reload) RELOAD=0 ;;
     --repair) REPAIR=1 ;; # Invoked by scripts/rebuild-on-login.sh.
     -h|--help) usage; exit 0 ;;
-    *) echo "未知参数：${arg}" >&2; echo "Unknown option: ${arg}" >&2; usage >&2; exit 2 ;;
+    *) ba_click_fx_message "未知参数：${arg}" "Unknown option: ${arg}" >&2; usage >&2; exit 2 ;;
   esac
 done
 
+if (( EUID == 0 )); then
+  ba_click_fx_message "请以普通用户运行，安装时会请求授权。" "Run as a regular user. Installation will request authorization." >&2
+  exit 2
+fi
+
 require_command cmake
 if (( REPAIR )); then
-  [[ "${MODE}" == "system" ]] || die "Automatic rebuild supports system source installs only."
+  [[ "${MODE}" == system ]] ||
+    die "自动重建只支持系统安装。" "Automatic rebuild supports system source installs only."
   require_command flock
   require_command kdialog
   require_command pkexec
   RELOAD=0
 else
   require_command strings
-fi
-if [[ "${MODE}" == "system" ]] && (( ! REPAIR )); then
-  require_command sudo
+  if [[ "${MODE}" == system ]]; then
+    require_command sudo
+  fi
 fi
 
 if [[ -n "${JOBS:-}" && ! "${JOBS}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "安装失败：JOBS 必须是正整数。" >&2
-  echo "Installation failed: JOBS must be a positive integer." >&2
-  exit 1
+  die "JOBS 必须是正整数。" "JOBS must be a positive integer."
 fi
 if [[ -n "${JOBS:-}" ]]; then
   BUILD_JOBS="${JOBS}"
-elif command -v nproc >/dev/null 2>&1; then
+elif command -v nproc >/dev/null; then
   BUILD_JOBS="$(nproc)"
 else
   BUILD_JOBS=2
 fi
 
-# KWin native effect 的工厂 IID 包含 KWin 版本，不匹配时插件会被忽略。
-check_abi() {
+# KWin requires the full version in the effect plugin's factory IID.
+warn_abi_mismatch() {
   local installed built
   installed="$(ba_click_fx_kwin_version 2>/dev/null || true)"
   built="$(strings "${BUILD_DIR}/bin/${EFFECT_ID}.so" 2>/dev/null \
@@ -101,192 +85,167 @@ check_abi() {
            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 
   if [[ -n "${installed}" && -n "${built}" && "${installed}" != "${built}" ]]; then
-    echo "警告：插件是针对 KWin ${built} 编译的，已安装的 KWin 是 ${installed}。" >&2
-    echo "      请确认 KWin 开发包版本与已安装的 KWin 一致，然后重新编译。" >&2
-    echo "Warning: built for KWin ${built}, but the installed version is ${installed}." >&2
-    echo "Use matching KWin development packages and rebuild." >&2
+    ba_click_fx_message \
+      "警告：插件按 KWin ${built} 构建，本机是 ${installed}。请安装匹配的开发包后重建。" \
+      "Warning: plugin built for KWin ${built}; installed KWin is ${installed}. Use matching development files and rebuild." >&2
   fi
 }
 
-if [[ "${MODE}" == "user" ]]; then
+reload_effect() {
+  local qdbus cmd was_loaded
+  for cmd in qdbus6 qdbus-qt6 qdbus; do
+    if command -v "${cmd}" >/dev/null; then
+      qdbus="${cmd}"
+      break
+    fi
+  done
+  if [[ -z "${qdbus:-}" ]]; then
+    ba_click_fx_message "找不到 qdbus。请在系统设置中启用特效。" "qdbus is unavailable. Enable the effect in System Settings."
+    return 0
+  fi
+
+  was_loaded="$("${qdbus}" org.kde.KWin /Effects isEffectLoaded "${EFFECT_ID}" 2>/dev/null || true)"
+  # Recreating the effect can reuse the binary already mapped in KWin.
+  "${qdbus}" org.kde.KWin /Effects unloadEffect "${EFFECT_ID}" >/dev/null 2>&1 || true
+  if ! "${qdbus}" org.kde.KWin /Effects loadEffect "${EFFECT_ID}" 2>/dev/null | grep -q true; then
+    ba_click_fx_message "当前会话未加载特效。请重新登录 Plasma 后启用。" \
+      "The effect did not load. Log out and back in to Plasma, then enable it." >&2
+  elif [[ "${MODE}" == system && "${was_loaded}" == true ]]; then
+    ba_click_fx_message "请重新登录 Plasma，让 KWin 加载新版本。" "Log out and back in to Plasma to load the new version."
+  else
+    ba_click_fx_message "特效已加载。" "Effect loaded."
+  fi
+}
+
+PREFIX=/usr
+if [[ "${MODE}" == user ]]; then
   PREFIX="${HOME}/.local"
-else
-  PREFIX="/usr"
 fi
-# KDEInstallDirs 会把安装目录写入 CMake 缓存，因此两种模式使用独立构建目录。
+# KDE install paths are cached separately for the system and user prefixes.
 BUILD_DIR="${SRC_DIR}/build/plugin-${MODE}"
 if command -v flock >/dev/null && ! ba_click_fx_lock_build "${BUILD_DIR}"; then
-  die "已有安装或卸载正在使用此构建目录 / Another install or uninstall is using this build directory."
+  die "构建目录正被其他安装或卸载使用。" "Another install or uninstall is using this build directory."
 fi
 
 if (( REPAIR )); then
   original_plugin="$(ba_click_fx_installed_plugin "${BUILD_DIR}")" || exit 0
-  installed_version="$(ba_click_fx_kwin_version)" || die "无法读取 KWin 版本 / Cannot read the KWin version."
+  installed_version="$(ba_click_fx_kwin_version)" ||
+    die "无法读取 KWin 版本。" "Could not read the KWin version."
   old_version="$(ba_click_fx_plugin_version "${original_plugin}")" ||
-    die "无法读取已安装插件的 IID / Cannot read the installed plugin IID."
+    die "无法读取已安装插件的 IID。" "Could not read the installed plugin IID."
   [[ "${installed_version}" != "${old_version}" ]] || exit 0
-  echo "KWin ${installed_version}, installed plugin IID version ${old_version}"
+  ba_click_fx_message "本机 KWin ${installed_version}，插件 IID ${old_version}。" \
+    "Installed KWin ${installed_version}, plugin IID version ${old_version}."
 fi
 
-echo "==> 配置"
-echo "==> Configure"
+ba_click_fx_message "==> 配置" "==> Configure"
 
-# 旧版本曾以 root 构建。普通安装也可能留下 root 写入的安装清单，清单不影响增量编译。
+# Older installs could leave root-owned build files. The install manifest is safe to keep.
 if (( ! REPAIR )) && [[ -d "${BUILD_DIR}" ]] &&
     find "${BUILD_DIR}" -uid 0 ! -path "${BUILD_DIR}/install_manifest.txt" -print -quit 2>/dev/null | grep -q .; then
-  echo "清理旧的管理员构建目录：${BUILD_DIR}" >&2
-  echo "Removing old root-owned build: ${BUILD_DIR}" >&2
+  ba_click_fx_message "清理旧的 root 构建目录：${BUILD_DIR}" "Removing the old root-owned build: ${BUILD_DIR}" >&2
   require_command sudo
   sudo rm -rf -- "${BUILD_DIR}"
 fi
 
-if ! cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
+if ! configure_output="$(cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DBUILD_TESTING=OFF \
-  -DCMAKE_INSTALL_PREFIX="${PREFIX}"; then
-  echo >&2
-  echo "CMake 配置失败。请确认已安装 README.md 中列出的 Qt、KF6、ECM 和 KWin 开发包。" >&2
-  echo "CMake configuration failed. Install the Qt, KF6, ECM and KWin development packages listed in README.en.md." >&2
-  exit 1
+  -DCMAKE_INSTALL_MESSAGE=NEVER \
+  -DCMAKE_INSTALL_PREFIX="${PREFIX}")"; then
+  printf '%s\n' "${configure_output}" >&2
+  die "CMake 配置失败。请核对 README.md 中的构建依赖。" \
+    "CMake configuration failed. Check the build dependencies in README.en.md."
 fi
 
-if [[ ! -s "${BUILD_DIR}/plugin-install-dir.txt" ]]; then
-  echo "构建系统没有生成插件安装目录。" >&2
-  echo "The build system did not generate the plugin install directory." >&2
-  exit 1
-fi
+[[ -s "${BUILD_DIR}/plugin-install-dir.txt" ]] ||
+  die "找不到插件安装目录记录。" "The plugin install directory is missing."
 PLUGIN_DIR="$(<"${BUILD_DIR}/plugin-install-dir.txt")"
 EFFECT_PATH="${PLUGIN_DIR}/kwin/effects/plugins/${EFFECT_ID}.so"
 CONFIG_PATH="${PLUGIN_DIR}/kwin/effects/configs/kwin_ba_click_fx_config.so"
+if [[ -s "${BUILD_DIR}/kwin-build-version.txt" ]]; then
+  build_version="$(<"${BUILD_DIR}/kwin-build-version.txt")"
+  build_id_pattern='BA Click FX build id: ([[:xdigit:]]+)'
+  if [[ "${configure_output}" =~ ${build_id_pattern} ]]; then
+    printf 'KWin %s | Build ID %s\n' "${build_version}" "${BASH_REMATCH[1]}"
+  else
+    printf 'KWin %s\n' "${build_version}"
+  fi
+fi
 
 if (( REPAIR )); then
   [[ "${EFFECT_PATH}" == "${original_plugin}" ]] ||
-    die "插件安装路径已变更，请手动安装 / Plugin path changed. Run a manual install."
-  [[ -s "${BUILD_DIR}/kwin-build-version.txt" &&
-     "$(<"${BUILD_DIR}/kwin-build-version.txt")" == "${installed_version}" ]] ||
-    die "KWin 开发包与已安装版本不匹配 / KWin development files do not match the installed version."
+    die "安装路径已变更，请手动安装。" "The plugin path changed. Run a manual install."
+  [[ "${build_version:-}" == "${installed_version}" ]] ||
+    die "KWin 开发包与已安装版本不匹配。" "KWin development files do not match the installed version."
 fi
 
-echo "==> 编译"
-echo "==> Build"
+ba_click_fx_message "==> 编译" "==> Build"
 cmake --build "${BUILD_DIR}" -j"${BUILD_JOBS}"
 
 if (( REPAIR )); then
   built_version="$(ba_click_fx_plugin_version "${BUILD_DIR}/bin/${EFFECT_ID}.so")" ||
-    die "无法读取构建产物的 IID / Cannot read the rebuilt plugin IID."
+    die "无法读取构建产物的 IID。" "Could not read the rebuilt plugin IID."
   [[ "${built_version}" == "${installed_version}" ]] ||
-    die "构建产物的 IID 与 KWin 不匹配 / Rebuilt plugin IID does not match KWin."
+    die "构建产物的 IID 与 KWin 不匹配。" "The rebuilt plugin IID does not match KWin."
   [[ -f "${BUILD_DIR}/bin/kwin_ba_click_fx_config.so" ]] ||
-    die "缺少设置模块 / The rebuilt settings module is missing."
+    die "构建产物缺少设置模块。" "The rebuilt settings module is missing."
 
-  if kdialog --title 'BA Click FX' --yesno \
-      "已为 KWin ${installed_version} 重建 BA Click FX，是否安装？\nBA Click FX was rebuilt for KWin ${installed_version}. Install it now?"; then
+  if kdialog --title 'BA Click FX' --yesno "$(ba_click_fx_message \
+      "已为 KWin ${installed_version} 重建 BA Click FX。现在安装？" \
+      "BA Click FX was rebuilt for KWin ${installed_version}. Install it now?")"; then
     :
   else
     status=$?
-    [[ "${status}" == 1 ]] || die "无法显示安装确认 / Could not show the installation prompt."
-    echo "Installation declined."
+    [[ "${status}" == 1 ]] || die "无法显示安装确认。" "Could not show the installation prompt."
+    ba_click_fx_message "安装已取消。" "Installation cancelled."
     exit 0
   fi
   [[ "$(ba_click_fx_kwin_version)" == "${installed_version}" ]] ||
-    die "KWin 版本再次变化，请重新构建 / KWin changed again. Rebuild before installing."
+    die "KWin 版本再次变化，请重新构建。" "KWin changed again. Rebuild before installing."
 else
-  check_abi
+  warn_abi_mismatch
 fi
 
-echo "==> 安装到 ${PREFIX}"
-echo "==> Install to ${PREFIX}"
+ba_click_fx_message "==> 安装到 ${PREFIX}" "==> Install to ${PREFIX}"
 if (( REPAIR )); then
   if pkexec --disable-internal-agent "$(command -v cmake)" --install "${BUILD_DIR}"; then
     :
   else
     status=$?
     [[ "${status}" == 126 ]] || exit "${status}"
-    echo "Authorization cancelled."
+    ba_click_fx_message "安装已取消。" "Installation cancelled."
     exit 0
   fi
-elif [[ "${MODE}" == "system" ]]; then
+elif [[ "${MODE}" == system ]]; then
   sudo cmake --install "${BUILD_DIR}"
 else
   cmake --install "${BUILD_DIR}"
-  echo "提示：--user 安装的插件不在 Qt 默认插件路径中。"
-  echo "Note: --user plugins are outside Qt's default plugin path."
-  echo "启动 KWin 前请设置 QT_PLUGIN_PATH："
-  echo "Export QT_PLUGIN_PATH before starting KWin:"
-  echo "      export QT_PLUGIN_PATH=\"${PLUGIN_DIR}:\${QT_PLUGIN_PATH}\""
 fi
 
-if [[ ! -f "${EFFECT_PATH}" || ! -f "${CONFIG_PATH}" ]]; then
-  echo "安装失败：安装完成但未在 ${PLUGIN_DIR} 找到模块。" >&2
-  echo "Installation failed: installed modules not found under ${PLUGIN_DIR}." >&2
-  exit 1
-fi
-echo "Effect: ${EFFECT_PATH}"
-echo "Config: ${CONFIG_PATH}"
-
+[[ -f "${EFFECT_PATH}" && -f "${CONFIG_PATH}" ]] ||
+  die "找不到已安装的模块。" "The installed modules could not be found."
 if (( REPAIR )); then
   [[ "$(ba_click_fx_plugin_version "${EFFECT_PATH}")" == "${installed_version}" ]] ||
-    die "安装后的 IID 校验失败 / The installed plugin IID could not be verified."
-  kdialog --title 'BA Click FX' --msgbox \
-    "安装完成。请注销并重新登录 Plasma。\nInstalled. Log out and back in to Plasma." || true
+    die "安装后的 IID 校验失败。" "The installed plugin IID could not be verified."
 fi
-if [[ "${RELOAD}" -eq 0 ]]; then
+ba_click_fx_message "BA Click FX 安装完成。" "BA Click FX installed."
+
+if (( REPAIR )); then
+  kdialog --title 'BA Click FX' --msgbox "$(ba_click_fx_message \
+    "安装完成，请重新登录 Plasma。" "Installed. Log out and back in to Plasma.")" || true
   exit 0
 fi
 
-# qdbus 的可执行文件名因发行版而异。
-QDBUS=""
-for cmd in qdbus6 qdbus-qt6 qdbus; do
-  if command -v "${cmd}" >/dev/null 2>&1; then
-    QDBUS="${cmd}"
-    break
-  fi
-done
-if [[ -z "${QDBUS}" ]]; then
-  echo "未找到 qdbus6 / qdbus-qt6 / qdbus，跳过重载。"
-  echo "qdbus not found; effect reload skipped. Toggle the effect in System Settings."
-  exit 0
+if [[ "${MODE}" == user ]]; then
+  ba_click_fx_message "启动 KWin 前请设置插件路径：" "Set the plugin path before starting KWin:"
+  printf '  export QT_PLUGIN_PATH="%s:${QT_PLUGIN_PATH:-}"\n' "${PLUGIN_DIR}"
 fi
 
-was_loaded="$("${QDBUS}" org.kde.KWin /Effects isEffectLoaded "${EFFECT_ID}" 2>/dev/null || true)"
-
-echo "==> 重载特效"
-echo "==> Reload effect"
-# unload/load 只重建 Effect 对象；已映射的 native plugin 机器码仍会被进程缓存。
-"${QDBUS}" org.kde.KWin /Effects unloadEffect "${EFFECT_ID}" >/dev/null 2>&1 || true
-if "${QDBUS}" org.kde.KWin /Effects loadEffect "${EFFECT_ID}" 2>/dev/null | grep -q true; then
-  echo "已创建特效实例：${EFFECT_ID}"
-  echo "Effect instance created: ${EFFECT_ID}"
-else
-  echo "当前 KWin 尚未加载新插件，请注销并重新登录 Plasma。" >&2
-  echo "The current KWin did not load the new plugin. Log out and back in, then enable BA Click FX." >&2
-  exit 0
+if (( RELOAD )); then
+  reload_effect
 fi
 
-runtime_status="$("${QDBUS}" org.kde.KWin /Effects debug "${EFFECT_ID}" status 2>/dev/null || true)"
-if [[ -n "${runtime_status}" ]]; then
-  echo
-  echo "运行中实例：${runtime_status}"
-  echo "Runtime status: ${runtime_status}"
+if [[ "${MODE}" == system ]] && ! "${SRC_DIR}/scripts/rebuild-on-login.sh" --offer; then
+  ba_click_fx_message "登录检查未能开启。" "Could not enable the login check." >&2
 fi
-
-if [[ "${MODE}" == "system" && "${was_loaded}" == "true" ]]; then
-  echo >&2
-  echo "注意：安装前该 native effect 已经加载。" >&2
-  echo "KWin 已经重新创建了对象，但 Qt 仍缓存了旧的映射 .so。" >&2
-  echo "请重启 KWin Wayland 会话以使新二进制生效。" >&2
-  echo
-  echo "Note: the native effect was already loaded before installation." >&2
-  echo "KWin recreated the object, but Qt still caches the old mapped .so." >&2
-  echo "Restart the KWin Wayland session for the new binary to take effect." >&2
-
-fi
-
-echo
-echo "日志和诊断请使用特效设置页。"
-echo "命令行排查：README.md 和 docs/testing.md"
-echo "运行状态：${QDBUS} org.kde.KWin /Effects debug ${EFFECT_ID} status"
-echo
-echo "Use the effect settings page for logs and diagnostics."
-echo "CLI troubleshooting: README.en.md and docs/testing.md"
-echo "Runtime status: ${QDBUS} org.kde.KWin /Effects debug ${EFFECT_ID} status"

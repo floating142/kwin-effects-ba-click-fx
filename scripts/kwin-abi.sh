@@ -3,6 +3,13 @@
 
 BA_CLICK_FX_EFFECT_ID=kwin4_effect_ba_click_fx
 
+ba_click_fx_message() {
+  case "${LC_ALL:-${LC_MESSAGES:-${LANG:-C}}}" in
+    zh*) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "$2" ;;
+  esac
+}
+
 ba_click_fx_installed_plugin() {
   local build_dir="$1" plugin_dir plugin
   [[ -s "${build_dir}/plugin-install-dir.txt" && -r "${build_dir}/install_manifest.txt" ]] || return 1
@@ -15,7 +22,8 @@ ba_click_fx_installed_plugin() {
 
 ba_click_fx_kwin_version() {
   local output
-  output="$(LC_ALL=C kwin_wayland --version)" || return 1
+  # KWin prints its version on stdout. Keep Qt startup diagnostics out of the check.
+  output="$(kwin_wayland --version 2>/dev/null)" || return 1
   if [[ "${output}" =~ ^kwin([_-]wayland)?[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)($|[[:space:]]) ]]; then
     printf '%s\n' "${BASH_REMATCH[2]}"
   else
